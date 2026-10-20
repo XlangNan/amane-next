@@ -1,0 +1,371 @@
+{
+  "search": {
+    "placeholder": "搜索番号、标题…",
+    "advanced": "高级搜索",
+    "advancedHint": "在对应类型中搜索并添加筛选条件",
+    "facetPlaceholder": "搜索…",
+    "facetEmpty": "无匹配",
+    "hasFiles": "关联文件",
+    "hasFilesAny": "不限",
+    "hasFilesYes": "有文件",
+    "hasFilesNo": "无文件",
+    "hasSubtitle": "中字",
+    "vr": "VR",
+    "uncensored": "无码",
+    "mosaic": "马赛克标记",
+    "definition": "分辨率",
+    "contentType": "类型",
+    "any": "不限",
+    "yes": "是",
+    "no": "否",
+    "contentTypes": {
+      "censored": "有码",
+      "uncensored": "无码",
+      "chinese": "国产",
+      "western": "欧美",
+      "fc2": "FC2",
+      "amateur": "素人",
+      "hentai": "动漫"
+    },
+    "mosaics": {
+      "uncensored": "无码",
+      "cracked": "破解",
+      "leaked": "流出"
+    }
+  },
+  "filePhase": {
+    "subtitle": "中字",
+    "censored": "有码",
+    "uncensored": "无码",
+    "cracked": "破解",
+    "leaked": "流出"
+  },
+  "columns": {
+    "number": "番号",
+    "title": "标题",
+    "studio": "制作商",
+    "release": "发行日期",
+    "score": "评分",
+    "actions": "操作",
+    "created": "创建时间",
+    "updated": "更新时间",
+    "fileCount": "关联文件"
+  },
+  "actions": {
+    "scrape": "重新刮削",
+    "batchScrape": "批量重新刮削",
+    "batchDelete": "批量删除",
+    "confirmBatchDeleteTitle": "删除选中的影片？",
+    "confirmBatchDeleteDesc": "将永久删除选中的影片, 此操作不可撤销"
+  },
+  "edit": {
+    "title": "编辑影片"
+  },
+  "detail": {
+    "fields": {
+      "title": "标题",
+      "studio": "制作商",
+      "publisher": "发行商",
+      "release": "发行日期",
+      "runtime": "时长",
+      "score": "评分",
+      "vr": "VR",
+      "series": "系列",
+      "directors": "导演",
+      "actors": "演员",
+      "tags": "标签",
+      "plot": "剧情",
+      "trailer": "预告片",
+      "poster": "海报",
+      "thumb": "封面",
+      "extrafanart": "剧照",
+      "sourceUrls": "来源链接"
+    },
+    "connections": "关联文件",
+    "noFiles": "无关联文件",
+    "openInLibrary": "在媒体库中查看",
+    "userTags": "用户标签",
+    "noUserTags": "暂无用户标签",
+    "selectUserTag": "选择或输入用户标签…",
+    "newUserTagPlaceholder": "新建用户标签…",
+    "addUserTag": "添加用户标签",
+    "removeUserTag": "移除用户标签",
+    "applyAddUserTags": "添加 {{count}} 个",
+    "applyRemoveUserTags": "移除 {{count}} 个",
+    "createUserTag": "创建「{{name}}」",
+    "detachUserTag": "从此影片移除",
+    "comments": "评论",
+    "commentPlaceholder": "写下评论…",
+    "addComment": "发表评论",
+    "editComment": "编辑评论",
+    "commentEditedAt": "(已编辑 {{time}})",
+    "commentJustNow": "刚刚",
+    "commentSortLabel": "按编辑时间",
+    "commentSortNewest": "新 → 旧",
+    "commentSortOldest": "旧 → 新",
+    "deleteCommentTitle": "删除评论",
+    "deleteCommentMessage": "删除后无法恢复",
+    "playTrailer": "播放预告片",
+    "closeTrailer": "关闭预告片",
+    "trailerFailed": "无法播放此预告片",
+    "coverUnavailable": "封面不可用",
+    "playback": "播放",
+    "playbackFailed": "无法播放此码流",
+    "playbackFailedWithStatus": "无法播放此码流(HTTP {{status}})",
+    "playbackFailedHls": "无法播放此码流(播放器错误 {{details}}): {{url}}",
+    "playbackFailedHlsWithStatus": "无法播放此码流(播放器错误 {{details}}, HTTP {{status}}): {{url}}",
+    "playbackUnsupported": "此播放源的媒体类型无法在页面内播放",
+    "playbackUnavailable": "该播放源当前不可用",
+    "playbackUnavailableOption": "{{name}}(当前不可用)",
+    "playbackSourcesFailed": "无法加载播放源",
+    "playbackStreamsFailed": "无法加载流列表",
+    "playbackSourceLabel": "播放源",
+    "playbackStreamLabel": "码流",
+    "playbackVolume": "音量",
+    "playbackBrightness": "亮度",
+    "playbackRate": "倍速",
+    "playbackToggle": "播放/暂停",
+    "playbackClose": "关闭",
+    "playbackMuted": "静音",
+    "commentSeek": "跳转到 {{time}}",
+    "cropPoster": {
+      "action": "裁切海报",
+      "title": "裁切海报",
+      "lockAspect": "锁定",
+      "aspect": "宽高比",
+      "left": "左",
+      "top": "上",
+      "width": "宽",
+      "height": "高",
+      "confirm": "裁切并保存",
+      "needSelection": "请先框选有效区域",
+      "success": "海报已更新",
+      "noThumb": "需要封面图才能裁切海报"
+    },
+    "playbackCopyTimestamp": "复制时间戳",
+    "playbackCopyLink": "复制当前时间的链接",
+    "playbackCopied": "已复制到剪贴板",
+    "playbackCopyFailed": "复制失败"
+  },
+  "browse": {
+    "title": "分类浏览",
+    "subtitle": "按演员、标签、制作商等浏览影片",
+    "searchPlaceholder": "搜索分类名称…",
+    "count": "{{count}} 部",
+    "kinds": {
+      "actor": "演员",
+      "director": "导演",
+      "tag": "标签",
+      "studio": "制作商",
+      "publisher": "发行商",
+      "series": "系列",
+      "user_tag": "用户标签"
+    },
+    "filterInMeta": "在片库中筛选",
+    "scrapeActor": "刮削",
+    "scrapeQueued": "已提交演员刮削任务",
+    "person": {
+      "aliases": "别名",
+      "gender": "性别",
+      "genderFemale": "女",
+      "genderMale": "男",
+      "genderUnknown": "未知",
+      "gender_female": "女",
+      "gender_male": "男",
+      "gender_unknown": "未知",
+      "birthday": "生日",
+      "birthplace": "出生地",
+      "height": "身高",
+      "bust": "胸围",
+      "waist": "腰围",
+      "hip": "臀围",
+      "measurements": "三围",
+      "cup": "罩杯",
+      "overview": "简介",
+      "tagline": "标语",
+      "sourceUrl": "来源链接",
+      "images": "头像",
+      "cm": "{{value}} cm",
+      "birthdayFormat": "格式: 2000-01-01 或 2000/1/1 或 2000年1月1日"
+    },
+    "tagFilms": "影片",
+    "tagActors": "演员"
+  },
+  "view": {
+    "grid": "海报",
+    "list": "列表",
+    "cloud": "词云"
+  },
+  "favorite": {
+    "add": "收藏",
+    "remove": "取消收藏",
+    "batchUpdated": "已更新 {{count}} 个分类的收藏",
+    "missing": "该分类已不存在",
+    "filterLabel": "收藏",
+    "filterAny": "不限",
+    "filterYes": "已收藏",
+    "filterNo": "未收藏",
+    "sectionTitle": "收藏"
+  },
+  "actors": {
+    "title": "演员",
+    "searchPlaceholder": "搜索姓名或别名…",
+    "empty": "暂无演员",
+    "hasImage": "头像",
+    "filterPerson": "人物信息",
+    "filterHasPerson": "有信息",
+    "filterNoPerson": "无信息",
+    "filterImage": "头像",
+    "filterHasImage": "有头像",
+    "filterNoImage": "无头像",
+    "filterApply": "应用筛选",
+    "age": "年龄",
+    "rangeMin": "最小",
+    "rangeMax": "最大",
+    "dateMinPlaceholder": "起始 YYYY-MM-DD",
+    "dateMaxPlaceholder": "结束 YYYY-MM-DD",
+    "cupMinPlaceholder": "如 C",
+    "cupMaxPlaceholder": "如 E",
+    "birthplacePlaceholder": "出生地包含…",
+    "batchGender": "批量性别",
+    "batchGenderDone": "已将 {{count}} 位演员标为「{{gender}}」",
+    "batchGenderFailed": "{{count}} 位更新失败",
+    "clearPerson": "清空信息",
+    "clearPersonFields": "清空 「{{name}}」 除性别外的所有信息",
+    "clearPersonLocks": "解除全部字段锁定",
+    "clearPersonCache": "清空各来源结果缓存",
+    "clearPersonKeep": "不删除条目本身",
+    "clearPersonDone": "已清空人物信息",
+    "batchClearPerson": "批量清空信息",
+    "batchClearPersonFields": "清空 {{count}} 位演员除性别外的所有信息",
+    "batchClearPersonDone": "已清空 {{count}} 位演员的人物信息",
+    "batchClearPersonFailed": "{{count}} 位清空失败",
+    "scrapeMissingOnPage": "刮削本页空缺",
+    "noneMissing": "本页无空缺",
+    "birthdayWithAge": "{{date}}({{age}}岁)",
+    "ageShort": "{{age}}岁",
+    "cupShort": "{{cup}}罩杯",
+    "filmography": "出演作品({{count}})",
+    "noPhoto": "暂无头像",
+    "goToLibrary": "转到片库",
+    "editTitle": "编辑演员",
+    "lockManage": "人物字段锁定",
+    "cropAvatar": {
+      "action": "裁切头像",
+      "title": "裁切头像",
+      "success": "头像已更新"
+    },
+    "genderHint": "未知时仅查询通用来源, 避免误匹配. 部分来源可自动获取此字段",
+    "genderUnknownHint": "无法判断时选此项; 刮削只请求同时覆盖两性的站点",
+    "aliasesHint": "回车或逗号添加, 点 × 删除",
+    "setDisplayName": "设为展示名",
+    "setDisplayNameBody": "将「{{alias}}」设为「{{name}}」的展示名？「{{name}}」会保留为别名",
+    "setDisplayNameDone": "已设为展示名",
+    "imagesEdit": "头像 URL",
+    "imagesEditHint": "第一张为主图(详情大图与头像墙). 拖拽卡片调整顺序, 点图预览",
+    "primaryImage": "主图",
+    "reorderImage": "拖拽排序头像",
+    "removeImage": "删除这张头像",
+    "rawSources": "刮削来源快照",
+    "rawSourcesHint": "各站原始快照, 只读; 供离线重新聚合",
+    "viewAll": "查看全部 {{count}} 位"
+  },
+  "notFound": "未找到影片",
+  "invalidId": "无效的影片 ID",
+  "confirmDelete": "确定删除影片 #{{id}}？此操作不可撤销",
+  "empty": "暂无影片记录",
+  "editor": {
+    "title": {
+      "label": "标题"
+    },
+    "actors": {
+      "label": "演员"
+    },
+    "studio": {
+      "label": "制作商"
+    },
+    "publisher": {
+      "label": "发行商"
+    },
+    "release": {
+      "label": "发行日期",
+      "description": "格式: 2000-01-01"
+    },
+    "runtime": {
+      "label": "时长 (分钟)"
+    },
+    "tags": {
+      "label": "标签"
+    },
+    "series": {
+      "label": "系列"
+    },
+    "plot": {
+      "label": "剧情"
+    },
+    "directors": {
+      "label": "导演"
+    },
+    "poster_urls": {
+      "label": "海报 URL"
+    },
+    "thumb_urls": {
+      "label": "封面 URL"
+    },
+    "trailer_urls": {
+      "label": "预告片 URL"
+    },
+    "extrafanart_urls": {
+      "label": "剧照 URL"
+    },
+    "scores": {
+      "label": "评分"
+    },
+    "external_ids": {
+      "label": "外部 ID"
+    },
+    "source_urls": {
+      "label": "来源链接"
+    }
+  },
+  "manage": {
+    "name": "名称",
+    "count": "数量",
+    "mergeGuide": "勾选来源后点击目标行的合并图标",
+    "mergeNeedSources": "请先勾选要合并的来源项, 再点目标项的合并",
+    "merge": "合并到此项",
+    "mergeConfirm": "确认合并",
+    "mergeConfirmBody": "将把 {{count}} 个来源合并到目标项",
+    "deleteFacetBody": "将从所有影片中移除「{{name}}」, 并加入剔除名单, 后续刮削时自动剔除",
+    "deleteUserTagBody": "确定永久删除用户标签 「{{name}}」？将从所有影片上移除该标签",
+    "rulesTitle": "分类规则",
+    "rulesHint": "刮削时自动按别名重命名并剔除. 移除规则不会影响现有影片",
+    "rulesEmpty": "暂无规则",
+    "ruleSource": "源名称",
+    "ruleAction": "动作",
+    "ruleTarget": "目标",
+    "ruleBlock": "剔除",
+    "ruleAlias": "别名",
+    "ruleRemove": "移除规则"
+  },
+  "merge": {
+    "title": "对比来源",
+    "noRawData": "无原始数据可用于合并",
+    "apply": "应用合并",
+    "revert": "回退",
+    "revertAll": "全部回退",
+    "current": "当前",
+    "changedCount": "已修改 {{count}} 个字段",
+    "noChanges": "无修改",
+    "loadImages": "加载图片"
+  },
+  "lock": {
+    "manage": "字段锁定",
+    "all": "全部锁定",
+    "clearAll": "全部解除",
+    "locked": "已锁定",
+    "unlocked": "未锁定",
+    "toggleLocked": "解锁字段",
+    "toggleUnlocked": "锁定字段"
+  }
+}

@@ -1,0 +1,1314 @@
+"""tests for amane.organize -- 路径模板解析.
+
+路径统一由 pytest tmp_path 派生 (跨平台绝对路径, Windows 上带盘符).
+不用 POSIX 硬编码绝对路径 (如 /media): 它们在 Windows 上是"无盘符的根相对路径",
+与 resolve() 后补盘符的绝对路径不相等, 也会让 safe_dirs 的跨盘判定误判.
+"""
+
+from pathlib import Path
+from sys import platform
+from typing import NamedTuple
+
+import pytest
+
+from amane.db.models import Library, Metadata
+from amane.enums import ActorGender, LinkMode
+from amane.organize import (
+    VIDEO_TEMPLATE_DEFAULT,
+    normalize_link_template,
+    render_path_template,
+    resolve_paths,
+    resolve_subtitle_path,
+    validate_path_template,
+)
+from amane.organize.template import (
+    PATH_FIELD_ELLIPSIS,
+    PATH_FIELD_MAX_BYTES,
+    PathEngine,
+    TemplateContext,
+    actress_names,
+)
+from amane.parsing import ContentType, parse_file_info
+
+
+@pytest.fixture
+def media(tmp_path: Path) -> Path:
+    """媒体库根目录 (tmp_path 已 resolve, 无符号链接残留, 保证 resolve 后路径不变形)."""
+    return tmp_path.resolve() / "media"
+
+
+@pytest.fixture
+def other(tmp_path: Path) -> Path:
+    """媒体根之外的目录, 作绝对模板写出路径 / safe_dirs (多盘分存场景)."""
+    return tmp_path.resolve() / "out"
+
+
+@pytest.fixture
+def etc(tmp_path: Path) -> Path:
+    """媒体根之外的目录, 用于"逃逸所有边界"的反例."""
+    return tmp_path.resolve() / "etc"
+
+
+def _meta(**kwargs) -> Metadata:
+    """创建测试用 Metadata, 填充默认值.
+
+    番号固定 ABC-123, 与源文件名里的 MIDV-123 无关: 模板 {number} 来自刮削元数据, 不是 parse_file_info.
+    """
+    defaults = {
+        "number": "ABC-123",
+        "title": "Test Title",
+        "actors": ["Actor1", "Actor2"],
+        "studio": "StudioX",
+        "release": "2024-01-15",
+    }
+    defaults.update(kwargs)
+    return Metadata(**defaults)
+
+
+class _RenderCase(NamedTuple):
+    """引擎核心: 源路径 parse_file_info → 按 template 渲染, expected 为相对库根目录的 posix 路径."""
+
+    source: str | None  # None: 不传 file_info
+    template: str
+    expected: str
+    meta: dict[str, object] | None = None
+
+
+# 模板 + 源文件 → 整理后相对库根目录的路径. 标记来自 source; metadata 字段来自 _meta, 可由 meta 覆盖.
+RENDER_CASES: tuple[_RenderCase, ...] = (
+    # --- 默认模板: [-CD{cd?}][-{sub?}] 两个并列组 ---
+    _RenderCase("MIDV-123.mp4", VIDEO_TEMPLATE_DEFAULT, "StudioX/ABC-123/ABC-123.mp4"),
+    _RenderCase("MIDV-123-CD1.mp4", VIDEO_TEMPLATE_DEFAULT, "StudioX/ABC-123/ABC-123-CD1.mp4"),
+    _RenderCase("MIDV-123-C.mp4", VIDEO_TEMPLATE_DEFAULT, "StudioX/ABC-123/ABC-123-C.mp4"),
+    _RenderCase("MIDV-123-CD1-C.mp4", VIDEO_TEMPLATE_DEFAULT, "StudioX/ABC-123/ABC-123-CD1-C.mp4"),
+    _RenderCase("MIDV-123-UC.mp4", VIDEO_TEMPLATE_DEFAULT, "StudioX/ABC-123/ABC-123-C.mp4"),
+    # --- 单占位符可选组: 空则连字面量一起省略 ---
+    _RenderCase("MIDV-123-CD2.mp4", "{number}/{number}[-Part {cd?}].{ext}", "ABC-123/ABC-123-Part 2.mp4"),
+    _RenderCase("MIDV-123.mp4", "{number}/{number}[-Part {cd?}].{ext}", "ABC-123/ABC-123.mp4"),
+    _RenderCase("MIDV-123-C.mp4", "{number}/{number}[-{sub?}].{ext}", "ABC-123/ABC-123-C.mp4"),
+    _RenderCase("MIDV-123.mp4", "{number}/{number}[-{sub?}].{ext}", "ABC-123/ABC-123.mp4"),
+    _RenderCase("ABC-123-4K.mp4", "{number}[[{def?}]].{ext}", "ABC-123[4K].mp4"),
+    _RenderCase("ABC-123.mp4", "{number}[[{def?}]].{ext}", "ABC-123.mp4"),
+    # --- 同组多个可空: 有一个非空就渲染, 空的不输出 ---
+    _RenderCase("MIDV-123-UC.mp4", "{number}[-{mosaic?|cracked=U}{sub?}].{ext}", "ABC-123-UC.mp4"),
+    _RenderCase("MIDV-123-C-U.mp4", "{number}[-{mosaic?|cracked=U}{sub?}].{ext}", "ABC-123-UC.mp4"),
+    _RenderCase("MIDV-123-U.mp4", "{number}[-{mosaic?|cracked=U}{sub?}].{ext}", "ABC-123-U.mp4"),
+    _RenderCase("MIDV-123-C.mp4", "{number}[-{mosaic?|cracked=U}{sub?}].{ext}", "ABC-123-C.mp4"),
+    _RenderCase("MIDV-123.mp4", "{number}[-{mosaic?|cracked=U}{sub?}].{ext}", "ABC-123.mp4"),
+    _RenderCase("[破解]MIDV-123.mp4", "{number}[-{mosaic?|cracked=U}{sub?}].{ext}", "ABC-123-U.mp4"),
+    _RenderCase("MIDV-123-cracked.mp4", "{number}[-{mosaic?}].{ext}", "ABC-123-cracked.mp4"),
+    _RenderCase("MIDV-123-cracked-C.mp4", "{number}[-{mosaic?}][-{sub?}].{ext}", "ABC-123-cracked-C.mp4"),
+    # 字面量跟着整组: 仅中字时仍带上 -CD
+    _RenderCase("MIDV-123-C.mp4", "{number}[-CD{cd?}{sub?}].{ext}", "ABC-123-CDC.mp4"),
+    _RenderCase("MIDV-123-CD1-C.mp4", "{number}[-CD{cd?}{sub?}].{ext}", "ABC-123-CD1C.mp4"),
+    # --- 嵌套组: 外层只看自己的直接占位符 ---
+    _RenderCase("MIDV-123-U-4K.mp4", "{number}[-{mosaic?|cracked=U}[-{def?}]].{ext}", "ABC-123-U-4K.mp4"),
+    _RenderCase("MIDV-123-U.mp4", "{number}[-{mosaic?|cracked=U}[-{def?}]].{ext}", "ABC-123-U.mp4"),
+    _RenderCase("ABC-123-4K.mp4", "{number}[-{mosaic?|cracked=U}[-{def?}]].{ext}", "ABC-123.mp4"),
+    # --- 值映射 ---
+    _RenderCase(
+        "MIDV-123-無碼.mp4",
+        "{mosaic?}/{number}[-{mosaic?|uncensored=无码,cracked=U}].{ext}",
+        "uncensored/ABC-123-无码.mp4",
+    ),
+    _RenderCase(
+        "[破解]MIDV-123.mp4",
+        "{mosaic?}/{number}[-{mosaic?|uncensored=无码,cracked=U}].{ext}",
+        "cracked/ABC-123-U.mp4",
+    ),
+    _RenderCase("MIDV-123-C.mp4", "{number}/{number}[-{sub?|C=中字}].{ext}", "ABC-123/ABC-123-中字.mp4"),
+    _RenderCase("ABC-123-4K.mp4", "{number}[[{def?|4K=2160p}]].{ext}", "ABC-123[2160p].mp4"),
+    _RenderCase("MIDV-123-CD1.mp4", "{number}/{number}[-第{cd?|1=一}集].{ext}", "ABC-123/ABC-123-第一集.mp4"),
+    _RenderCase("MIDV-123-CD2.mp4", "{number}/{number}[-第{cd?|1=一}集].{ext}", "ABC-123/ABC-123-第2集.mp4"),
+    _RenderCase("MIDV-123-無碼.mp4", "{number}[-{mosaic?|uncensored=}].{ext}", "ABC-123.mp4"),
+    # --- file 相位未检出为空, 空路径段折叠 ---
+    _RenderCase("MIDV-123-4K-無碼.mp4", "{mosaic?}/{def?}/{number}.{ext}", "uncensored/4K/ABC-123.mp4"),
+    _RenderCase("HEYZO-123-1080p.mp4", "{mosaic?}/{def?}/{number}.{ext}", "1080p/ABC-123.mp4"),
+    _RenderCase("ABC-123.mp4", "{mosaic?}/{def?}/{number}.{ext}", "ABC-123.mp4"),
+    _RenderCase("[破解]MIDV-123.mp4", "{mosaic?}/{number}.{ext}", "cracked/ABC-123.mp4"),
+    _RenderCase("[流出]MIDV-123.mp4", "{mosaic?}/{number}.{ext}", "leaked/ABC-123.mp4"),
+    _RenderCase("MIDV-123_4K_无码.mp4", "{mosaic?}/{def?}/{number}.{ext}", "uncensored/4K/ABC-123.mp4"),
+    _RenderCase("/media/uncensored/MIDV-123.mp4", "{mosaic?}/{def?}/{number}.{ext}", "uncensored/ABC-123.mp4"),
+    _RenderCase("/media/4K/MIDV-123.mp4", "{mosaic?}/{def?}/{number}.{ext}", "ABC-123.mp4"),
+    _RenderCase(None, "{mosaic?}/{def?}/{number}.{ext}", "ABC-123.mp4"),
+    _RenderCase("HEYZO-123-流出.mp4", "{mosaic?}/{number}.{ext}", "leaked/ABC-123.mp4"),
+    _RenderCase("MIDV-123.mp4", "{mosaic?}/{number}.{ext}", "ABC-123.mp4"),
+    _RenderCase("MIDV-123-無碼.mp4", "{mosaic?|uncensored=无码}/{number}.{ext}", "无码/ABC-123.mp4"),
+    _RenderCase("HEYZO-123.mp4", "{mosaic?|=有码}/{number}.{ext}", "有码/ABC-123.mp4"),
+    _RenderCase("FC2-1234567.mp4", "{mosaic?|=未知}/{number}.{ext}", "未知/ABC-123.mp4"),
+    _RenderCase("MIDV-123-無碼.mp4", "{number}[-{mosaic?|uncensored=无码}].{ext}", "ABC-123-无码.mp4"),
+    _RenderCase(
+        "MIDV-123.mp4",
+        "{content_type}/{number}.{ext}",
+        "censored/ABC-123.mp4",
+        meta={"content_type": ContentType.CENSORED},
+    ),
+    _RenderCase(
+        "HEYZO-123.mp4",
+        "{content_type}/{number}.{ext}",
+        "uncensored/ABC-123.mp4",
+        meta={"content_type": ContentType.UNCENSORED},
+    ),
+    _RenderCase(
+        "MIDV-123.mp4",
+        "{content_type|censored=有码,uncensored=无码}/{number}.{ext}",
+        "有码/ABC-123.mp4",
+        meta={"content_type": ContentType.CENSORED},
+    ),
+    _RenderCase(
+        "HEYZO-123.mp4",
+        "{content_type|censored=有码,uncensored=无码}/{number}.{ext}",
+        "无码/ABC-123.mp4",
+        meta={"content_type": ContentType.UNCENSORED},
+    ),
+    _RenderCase(
+        None,
+        "{content_type}/{number}.{ext}",
+        "censored/ABC-123.mp4",
+        meta={"content_type": ContentType.CENSORED},
+    ),
+    _RenderCase(
+        "FC2-1234567.mp4",
+        "{content_type}/{mosaic?}/{number}.{ext}",
+        "fc2/ABC-123.mp4",
+        meta={"content_type": ContentType.FC2},
+    ),
+    # --- 马赛克性质: 标记优先, 没命中时继承条目类型 ---
+    _RenderCase(
+        "MIDV-123.mp4",
+        "{mosaic?}/{number}.{ext}",
+        "censored/ABC-123.mp4",
+        meta={"content_type": ContentType.CENSORED},
+    ),
+    _RenderCase(
+        "MIDV-123.mp4",
+        "{mosaic?}/{number}.{ext}",
+        "uncensored/ABC-123.mp4",
+        meta={"content_type": ContentType.UNCENSORED},
+    ),
+    _RenderCase(
+        "MIDV-123-無碼.mp4",
+        "{mosaic?}/{number}.{ext}",
+        "uncensored/ABC-123.mp4",
+        meta={"content_type": ContentType.CENSORED},
+    ),
+    _RenderCase(
+        "MD-0123.mp4",
+        "[{mosaic?}]/{number}.{ext}",
+        "ABC-123.mp4",
+        meta={"content_type": ContentType.CHINESE},
+    ),
+    _RenderCase(
+        "MIDV-123.mp4",
+        "{mosaic?|censored=有码,uncensored=无码}/{number}.{ext}",
+        "有码/ABC-123.mp4",
+        meta={"content_type": ContentType.CENSORED},
+    ),
+    # {cd} 不是 {cd?}, 视为未知 key
+    _RenderCase("MIDV-123-CD1.mp4", "{number}[-CD{cd}].{ext}", "ABC-123-CDUnknown.mp4"),
+    # metadata 缺省是字面量 Unknown; 映成空串后可选组省略, 路径空段折叠
+    _RenderCase(None, "{studio|Unknown=未分类}/{number}.{ext}", "未分类/ABC-123.mp4", {"studio": None}),
+    _RenderCase(None, "{studio|Unknown=}/{number}.{ext}", "ABC-123.mp4", {"studio": None}),
+    _RenderCase(None, "[{actress|Unknown=}]/{number}.{ext}", "ABC-123.mp4", {"actors": []}),
+    _RenderCase(None, "[{actress|Unknown=}]/{number}.{ext}", "Alice/ABC-123.mp4", {"actors": ["Alice"]}),
+    _RenderCase(None, "A/[{actress|Unknown=}]/B/{number}.{ext}", "A/B/ABC-123.mp4", {"actors": []}),
+    _RenderCase(None, "A/[{actress|Unknown=}]/B/{number}.{ext}", "A/Alice/B/ABC-123.mp4", {"actors": ["Alice"]}),
+)
+
+
+@pytest.mark.parametrize("case", RENDER_CASES, ids=lambda c: f"{c.source} -> {c.expected}")
+def test_render_from_file(case: _RenderCase, media: Path) -> None:
+    """模板引擎核心表: source → FileInfo → template → 相对库根目录的路径."""
+    wp = Library(name="t", path=str(media), video_template=case.template)
+    file_info = parse_file_info(case.source) if case.source is not None else None
+    result = resolve_paths(wp, _meta(**(case.meta or {})), ext="mp4", file_info=file_info)
+    assert result.video == media.joinpath(*case.expected.split("/"))
+
+
+class TestResolvePathsBasic:
+    """基本模板渲染."""
+
+    def test_default_video_template(self, media: Path):
+        wp = Library(name="t", path=str(media), video_template="{studio}/{number}/{number}.{ext}")
+        meta = _meta()
+        result = resolve_paths(wp, meta, ext="mp4")
+
+        assert result.video == media / "StudioX" / "ABC-123" / "ABC-123.mp4"
+
+    def test_relative_path_resolved_to_watch_path(self, media: Path):
+        wp = Library(name="t", path=str(media / "data" / "videos"), video_template="{number}/{number}.{ext}")
+        meta = _meta()
+        result = resolve_paths(wp, meta, ext="mkv")
+
+        assert result.video == media / "data" / "videos" / "ABC-123" / "ABC-123.mkv"
+
+    def test_absolute_template(self, media: Path, other: Path):
+        wp = Library(name="t", path=str(media), video_template=str(other / "{studio}" / "{number}" / "{number}.{ext}"))
+        meta = _meta()
+        result = resolve_paths(wp, meta, ext="mp4", safe_dirs=[other])
+
+        assert result.video == other / "StudioX" / "ABC-123" / "ABC-123.mp4"
+
+
+class _InPlaceCase(NamedTuple):
+    """原地模式: 源文件名 → 产物与视频同目录同文件名, 只换后缀."""
+
+    source: str
+    nfo: str
+    thumb: str
+    poster: str
+    fanart: str
+    trailer: str
+
+
+IN_PLACE_CASES: tuple[_InPlaceCase, ...] = (
+    _InPlaceCase(
+        "剧集/MIDV-123.strm",
+        "剧集/MIDV-123.nfo",
+        "剧集/MIDV-123-thumb.jpg",
+        "剧集/MIDV-123-poster.jpg",
+        "剧集/MIDV-123-fanart.jpg",
+        "剧集/MIDV-123-trailer.mp4",
+    ),
+    _InPlaceCase(
+        "a/b/c/MIDV-123-CD2-C.mkv",
+        "a/b/c/MIDV-123-CD2-C.nfo",
+        "a/b/c/MIDV-123-CD2-C-thumb.jpg",
+        "a/b/c/MIDV-123-CD2-C-poster.jpg",
+        "a/b/c/MIDV-123-CD2-C-fanart.jpg",
+        "a/b/c/MIDV-123-CD2-C-trailer.mp4",
+    ),
+    # 库根下直接放的文件: 目录名不参与, 视频路径就是源路径.
+    _InPlaceCase("原名 [x].v2.strm", "原名 [x].v2.nfo", "原名 [x].v2-thumb.jpg", "原名 [x].v2-poster.jpg", "原名 [x].v2-fanart.jpg", "原名 [x].v2-trailer.mp4"),
+)
+
+
+class TestInPlace:
+    """in_place: 视频即源文件, 产物落在视频旁; 与视频模板 / 链接模板无关."""
+
+    @pytest.mark.parametrize("case", IN_PLACE_CASES, ids=lambda c: c.source)
+    def test_products_follow_source(self, case: _InPlaceCase, media: Path):
+        # 视频模板与链接模板故意填成会搬走文件的值: 原地模式下都不该生效.
+        wp = Library(
+            name="t",
+            path=str(media),
+            in_place=True,
+            video_template="{studio}/{number}/{number}.{ext}",
+            link_template=str(media.parent / "links" / "{number}"),
+        )
+        source = media.joinpath(*case.source.split("/"))
+        result = resolve_paths(wp, _meta(), ext=source.suffix.lstrip("."), source_path=source)
+
+        assert result.video == source
+        assert result.link is None
+        base = media
+        assert result.nfo == base.joinpath(*case.nfo.split("/"))
+        assert result.thumb == base.joinpath(*case.thumb.split("/"))
+        assert result.poster == base.joinpath(*case.poster.split("/"))
+        assert result.fanart == base.joinpath(*case.fanart.split("/"))
+        assert result.trailer == base.joinpath(*case.trailer.split("/"))
+        assert result.extrafanart_dir == source.parent / "extrafanart"
+
+    def test_custom_product_template_wins(self, media: Path):
+        wp = Library(
+            name="t",
+            path=str(media),
+            in_place=True,
+            poster_template="{video_dir}/{video_name}.jpg",
+            nfo_template="{video_dir}/movie.nfo",
+        )
+        source = media / "x" / "MIDV-123.strm"
+        result = resolve_paths(wp, _meta(), ext="strm", source_path=source)
+
+        assert result.poster == source.parent / "MIDV-123.jpg"
+        assert result.nfo == source.parent / "movie.nfo"
+        assert result.thumb == source.parent / "MIDV-123-thumb.jpg"
+
+    def test_requires_source_path(self, media: Path):
+        wp = Library(name="t", path=str(media), in_place=True)
+        with pytest.raises(ValueError, match="原地模式需要源文件路径"):
+            resolve_paths(wp, _meta(), ext="strm")
+
+    def test_off_keeps_library_layout(self, media: Path):
+        """关闭时行为不变: 视频仍按视频模板落到库内新位置."""
+        wp = Library(name="t", path=str(media), in_place=False, video_template="{number}/{number}.{ext}")
+        source = media / "x" / "MIDV-123.strm"
+        result = resolve_paths(wp, _meta(), ext="strm", source_path=source)
+
+        assert result.video == media / "ABC-123" / "ABC-123.strm"
+        assert result.nfo == media / "ABC-123" / "ABC-123.nfo"
+
+
+class TestOptionalGroups:
+    """路径解析边界: 可选组经 `{video_name}` 进入 NFO 默认; 结构错误在写入时拒绝."""
+
+    def test_group_reaches_nfo_via_video_name(self, media: Path):
+        wp = Library(name="t", path=str(media), video_template="{number}/{number}[-CD{cd?}].{ext}")
+        result = resolve_paths(wp, _meta(), ext="mp4", cd=1)
+        assert result.nfo == media / "ABC-123" / "ABC-123-CD1.nfo"
+
+    def test_unclosed_group_rejected(self):
+        with pytest.raises(ValueError, match="可选组未闭合"):
+            validate_path_template("{number}[-CD{cd?}.{ext}")
+
+
+class TestValueMapping:
+    """`{name|k=v}` 值替换: 未列出的 key 保持原值; `{name|=缺省}` 映空源; 映射成空则省略可选组."""
+
+    def test_unmapped_key_keeps_canonical(self):
+        rendered = render_path_template("{mosaic?|cracked=破解}", {"mosaic?": "uncensored"})
+        assert rendered == "uncensored"
+
+    def test_empty_source_skips_mapping_without_empty_key(self):
+        rendered = render_path_template("{mosaic?|uncensored=U}", {"mosaic?": ""})
+        assert rendered == ""
+
+    def test_empty_source_maps_to_default(self):
+        rendered = render_path_template("{mosaic?|=有码}", {"mosaic?": ""})
+        assert rendered == "有码"
+
+    def test_present_source_ignores_empty_key(self):
+        rendered = render_path_template("{mosaic?|=有码}", {"mosaic?": "uncensored"})
+        assert rendered == "uncensored"
+
+    def test_map_present_to_empty_omits_group(self):
+        rendered = render_path_template("x[{mosaic?|uncensored=}]", {"mosaic?": "uncensored"})
+        assert rendered == "x"
+
+
+class TestValidatePathTemplate:
+    def test_nested_groups(self):
+        assert validate_path_template("{number}[-{mosaic?}[-{def?}]]") == "{number}[-{mosaic?}[-{def?}]]"
+
+    def test_unclosed_placeholder(self):
+        with pytest.raises(ValueError, match="占位符未闭合"):
+            validate_path_template("{number")
+
+    @pytest.mark.parametrize(
+        "template",
+        [
+            "{mosaic?|uncensored=U,cracked=破解}",
+            "{mosaic?|censored=有码}",
+            "{mosaic?|censored=,uncensored=无码}",
+            "{mosaic?|cracked=破解}",
+            "{mosaic?|leaked=流出}",
+            "{mosaic?|cracked=U}",
+            "{sub?|C=中字}",
+            "{def?|4K=2160p,1080p=FHD}",
+            "{cd?|1=一,2=二}",
+            "{studio|Unknown=未分类}",
+            "{studio|Unknown=}",
+            "{mosaic?|uncensored=}",
+            "{mosaic?|=有码}",
+            "{mosaic?|=有码,uncensored=无码}",
+            "{content_type|censored=有码,uncensored=无码}",
+            "A/[{actress|Unknown=}]/B/{number}.{ext}",
+        ],
+    )
+    def test_value_mapping_accepted(self, template: str):
+        assert validate_path_template(template) == template
+
+    @pytest.mark.parametrize(
+        ("template", "match"),
+        [
+            ("{mosaic?|}", "空的占位符映射"),
+            ("{mosaic?|uncensored}", "占位符映射无效"),
+            ("{mosaic?|=U,=V}", "映射键重复"),
+            ("{mosaic?|uncensored=U,uncensored=V}", "映射键重复"),
+            ("{mosaic?|uncencored=U}", "映射键未知"),
+            ("{content_type|unknown=x}", "映射键未知"),
+            ("{def?|2160p=4K}", "映射键未知"),
+            ("{sub?|CH=中字}", "映射键未知"),
+            ("{mosaic?|uncensored=U,}", "占位符映射无效"),
+        ],
+    )
+    def test_value_mapping_rejected(self, template: str, match: str):
+        with pytest.raises(ValueError, match=match):
+            validate_path_template(template)
+
+
+class TestResolvePathsDefaults:
+    """默认推导测试 (模板字段为 None)."""
+
+    def test_thumb_default(self, media: Path):
+        wp = Library(name="t", path=str(media), video_template="{studio}/{number}/{number}.{ext}")
+        meta = _meta()
+        result = resolve_paths(wp, meta, ext="mp4")
+
+        assert result.thumb == media / "StudioX" / "ABC-123" / "thumb.jpg"
+
+    def test_poster_default(self, media: Path):
+        wp = Library(name="t", path=str(media), video_template="{studio}/{number}/{number}.{ext}")
+        meta = _meta()
+        result = resolve_paths(wp, meta, ext="mp4")
+
+        assert result.poster == media / "StudioX" / "ABC-123" / "poster.jpg"
+
+    def test_fanart_default(self, media: Path):
+        wp = Library(name="t", path=str(media), video_template="{studio}/{number}/{number}.{ext}")
+        meta = _meta()
+        result = resolve_paths(wp, meta, ext="mp4")
+
+        assert result.fanart == media / "StudioX" / "ABC-123" / "fanart.jpg"
+
+    def test_extrafanart_default(self, media: Path):
+        wp = Library(name="t", path=str(media), video_template="{studio}/{number}/{number}.{ext}")
+        meta = _meta()
+        result = resolve_paths(wp, meta, ext="mp4")
+
+        assert result.extrafanart_dir == media / "StudioX" / "ABC-123" / "extrafanart"
+
+    def test_nfo_default(self, media: Path):
+        wp = Library(name="t", path=str(media), video_template="{studio}/{number}/{number}.{ext}")
+        meta = _meta()
+        result = resolve_paths(wp, meta, ext="mp4")
+
+        assert result.nfo == media / "StudioX" / "ABC-123" / "ABC-123.nfo"
+
+    def test_trailer_default(self, media: Path):
+        wp = Library(name="t", path=str(media), video_template="{studio}/{number}/{number}.{ext}")
+        meta = _meta()
+        result = resolve_paths(wp, meta, ext="mp4")
+
+        assert result.trailer == media / "StudioX" / "ABC-123" / "trailer.mp4"
+
+    def test_subtitle_default_keeps_raw_name(self, media: Path):
+        wp = Library(name="t", path=str(media), video_template="{studio}/{number}/{number}.{ext}")
+        meta = _meta()
+        video = resolve_paths(wp, meta, ext="mp4")
+        sub = resolve_subtitle_path(wp, meta, Path("/inbox/MIDV-123.zh.srt"), video_dir=video.video.parent)
+        assert sub == media / "StudioX" / "ABC-123" / "MIDV-123.zh.srt"
+
+
+class TestResolvePathsCustomTemplates:
+    """自定义模板测试."""
+
+    def test_custom_thumb_template_absolute(self, media: Path, other: Path):
+        wp = Library(
+            name="t",
+            path=str(media),
+            video_template="{studio}/{number}/{number}.{ext}",
+            thumb_template=str(other / "{number}" / "thumb.jpg"),
+        )
+        meta = _meta()
+        result = resolve_paths(wp, meta, ext="mp4", safe_dirs=[other])
+
+        assert result.thumb == other / "ABC-123" / "thumb.jpg"
+
+    def test_custom_thumb_template_with_video_dir(self, media: Path):
+        wp = Library(
+            name="t",
+            path=str(media),
+            video_template="{studio}/{number}/{number}.{ext}",
+            thumb_template="{video_dir}/images/thumb.jpg",
+        )
+        meta = _meta()
+        result = resolve_paths(wp, meta, ext="mp4")
+
+        assert result.thumb == media / "StudioX" / "ABC-123" / "images" / "thumb.jpg"
+
+    def test_custom_nfo_template(self, media: Path):
+        wp = Library(
+            name="t",
+            path=str(media),
+            video_template="{number}/{number}.{ext}",
+            nfo_template="{video_dir}/metadata/{number}.nfo",
+        )
+        meta = _meta()
+        result = resolve_paths(wp, meta, ext="mp4")
+
+        assert result.nfo == media / "ABC-123" / "metadata" / "ABC-123.nfo"
+
+    def test_custom_extrafanart_template_relative(self, media: Path):
+        wp = Library(
+            name="t",
+            path=str(media),
+            video_template="{number}/{number}.{ext}",
+            extrafanart_template="gallery/{number}",
+        )
+        meta = _meta()
+        result = resolve_paths(wp, meta, ext="mp4")
+
+        assert result.extrafanart_dir == media / "gallery" / "ABC-123"
+
+
+class TestResolvePathsEdgeCases:
+    """边界情况."""
+
+    def test_missing_metadata_fields(self, media: Path):
+        wp = Library(name="t", path=str(media), video_template="{studio}/{series}/{number}.{ext}")
+        meta = _meta(studio=None, series=None)
+        result = resolve_paths(wp, meta, ext="mp4")
+
+        assert result.video == media / "Unknown" / "Unknown" / "ABC-123.mp4"
+
+    def test_empty_ext(self, media: Path):
+        wp = Library(name="t", path=str(media), video_template="{number}/{number}.{ext}")
+        meta = _meta()
+        result = resolve_paths(wp, meta, ext="")
+
+        assert result.video.parent == media / "ABC-123"
+        # 段尾的点按 Windows 创建结果剥除, 各平台结果一致.
+        assert result.video.name == "ABC-123"
+
+    def test_video_dir_computed_from_absolute_video(self, media: Path, other: Path):
+        wp = Library(name="t", path=str(media), video_template=str(other / "{number}" / "{number}.{ext}"))
+        meta = _meta()
+        result = resolve_paths(wp, meta, ext="mp4", safe_dirs=[other])
+
+        # video_dir should be other/ABC-123/
+        assert result.thumb == other / "ABC-123" / "thumb.jpg"
+
+    def test_year_variable(self, media: Path):
+        wp = Library(name="t", path=str(media), video_template="{year}/{number}/{number}.{ext}")
+        meta = _meta(release="2024-05-01")
+        result = resolve_paths(wp, meta, ext="mp4")
+
+        assert result.video == media / "2024" / "ABC-123" / "ABC-123.mp4"
+
+
+class TestSourceVariables:
+    """源文件变量 {raw_dir} / {raw_name}."""
+
+    def test_raw_dir_is_source_parent_name(self, media: Path):
+        """{raw_dir}: A/B/C.mp4 → B."""
+        arch = media / "archive"
+        wp = Library(name="t", path=str(arch), video_template=str(arch / "{raw_dir}" / "{number}.{ext}"))
+        meta = _meta()
+        result = resolve_paths(wp, meta, ext="mp4", source_path=media / "A" / "B" / "C.mp4")
+        assert result.video == arch / "B" / "ABC-123.mp4"
+
+    def test_raw_name_is_source_stem(self, media: Path):
+        """{raw_name}: A/B.mp4 → B."""
+        wp = Library(name="t", path=str(media), video_template="{studio}/{number}/{raw_name}.{ext}")
+        meta = _meta()
+        result = resolve_paths(wp, meta, ext="mp4", source_path=media / "A" / "B.mp4")
+        assert result.video == media / "StudioX" / "ABC-123" / "B.mp4"
+
+    def test_raw_dir_empty_when_no_source_path(self, media: Path):
+        """不传 source_path 时 {raw_dir} 降级为空串 (非首段, 多余分隔符被 resolve 折叠)."""
+        wp = Library(name="t", path=str(media), video_template="sub/{raw_dir}/{number}.{ext}")
+        meta = _meta()
+        result = resolve_paths(wp, meta, ext="mp4")
+        assert result.video == media / "sub" / "ABC-123.mp4"
+
+    def test_raw_name_empty_when_no_source_path(self, media: Path):
+        """不传 source_path 时 {raw_name} 降级为空串."""
+        wp = Library(name="t", path=str(media), video_template="sub/{raw_name}.{ext}")
+        meta = _meta()
+        result = resolve_paths(wp, meta, ext="mp4")
+        assert result.video == media / "sub" / ".mp4"
+
+    def test_dir_alias_matches_raw_dir(self, media: Path):
+        """{dir} 与 {raw_dir} 同值."""
+        arch = media / "archive"
+        wp = Library(name="t", path=str(arch), video_template=str(arch / "{dir}" / "{number}.{ext}"))
+        meta = _meta()
+        result = resolve_paths(wp, meta, ext="mp4", source_path=media / "A" / "B" / "C.mp4")
+        assert result.video == arch / "B" / "ABC-123.mp4"
+
+
+class TestPathTraversalProtection:
+    """路径逃逸防护."""
+
+    def test_relative_template_with_dotdot_raises(self, media: Path):
+        """相对模板中含 .. 导致逃逸时抛出 ValueError"""
+        wp = Library(name="t", path=str(media / "incoming"), video_template="../../etc/{number}.{ext}")
+        meta = _meta()
+        with pytest.raises(ValueError, match="路径越界"):
+            resolve_paths(wp, meta, ext="mp4")
+
+    def test_metadata_title_sanitized_no_escape(self, media: Path):
+        """元数据字段中的 ../ 被 _safe 清理, 不会导致逃逸"""
+        wp = Library(name="t", path=str(media / "incoming"), video_template="{title}/{number}.{ext}")
+        meta = _meta(title="../../escape")
+        result = resolve_paths(wp, meta, ext="mp4")
+        # _safe 将 / 替换为空格, 结果安全地在 base 内
+        assert str(result.video).startswith(str(media / "incoming"))
+
+    def test_absolute_template_rejected_without_safe_dir(self, media: Path, other: Path):
+        """绝对路径模板逃逸 base 且无 safe_dirs 覆盖时, 抛出 ValueError"""
+        wp = Library(name="t", path=str(media), video_template=str(other / "{number}" / "{number}.{ext}"))
+        meta = _meta()
+        with pytest.raises(ValueError, match="路径越界"):
+            resolve_paths(wp, meta, ext="mp4")
+
+    def test_absolute_template_allowed_within_safe_dir(self, media: Path, other: Path):
+        """绝对路径模板位于 safe_dirs 内时允许 (多盘分存场景)"""
+        wp = Library(name="t", path=str(media), video_template=str(other / "{number}" / "{number}.{ext}"))
+        meta = _meta()
+        result = resolve_paths(wp, meta, ext="mp4", safe_dirs=[other])
+        assert result.video == other / "ABC-123" / "ABC-123.mp4"
+
+    def test_absolute_template_escaping_safe_dir_rejected(self, media: Path, other: Path, etc: Path):
+        """绝对路径模板逃逸所有 safe_dirs 时, 仍抛出 ValueError"""
+        wp = Library(name="t", path=str(media), video_template=str(etc / "{number}" / "{number}.{ext}"))
+        meta = _meta()
+        with pytest.raises(ValueError, match="路径越界"):
+            resolve_paths(wp, meta, ext="mp4", safe_dirs=[other])
+
+    def test_absolute_template_allow_all_skips_extra_boundary(self, media: Path, other: Path):
+        """ALLOW_ALL (safe_dirs=None) 时绝对模板可在库外."""
+        wp = Library(name="t", path=str(media), video_template=str(other / "{number}" / "{number}.{ext}"))
+        result = resolve_paths(wp, _meta(), ext="mp4", safe_dirs=None)
+        assert result.video == other / "ABC-123" / "ABC-123.mp4"
+
+    def test_relative_template_still_rejects_escape_when_allow_all(self, media: Path):
+        """相对模板含 .. 时 ALLOW_ALL 仍拒绝逃出本库."""
+        wp = Library(name="t", path=str(media / "incoming"), video_template="../../etc/{number}.{ext}")
+        with pytest.raises(ValueError, match="路径越界"):
+            resolve_paths(wp, _meta(), ext="mp4", safe_dirs=None)
+
+    def test_absolute_template_within_base_ok(self, media: Path):
+        """绝对路径模板位于 base_path 内时无需 safe_dirs"""
+        wp = Library(name="t", path=str(media), video_template=str(media / "{number}" / "{number}.{ext}"))
+        meta = _meta()
+        result = resolve_paths(wp, meta, ext="mp4")
+        assert result.video == media / "ABC-123" / "ABC-123.mp4"
+
+    def test_relative_template_within_base_ok(self, media: Path):
+        """相对模板在 base 内正常工作"""
+        wp = Library(name="t", path=str(media), video_template="sub/dir/{number}.{ext}")
+        meta = _meta()
+        result = resolve_paths(wp, meta, ext="mp4")
+        assert result.video == media / "sub" / "dir" / "ABC-123.mp4"
+
+    @pytest.mark.skipif(platform == "win32", reason="Windows 上 ``//`` 前的两段是 UNC 主机与共享, 需真实网络路径")
+    def test_double_separator_root_not_flattened(self, tmp_path: Path):
+        """库根带 ``//`` 时, 折叠空段不得把前缀压成单个 ``/``, 否则附属产物被判成逃逸."""
+        media = Path(f"//{tmp_path.resolve().relative_to('/')}") / "media"
+        media.mkdir(parents=True)
+        wp = Library(name="t", path=str(media), video_template=VIDEO_TEMPLATE_DEFAULT)
+        result = resolve_paths(wp, _meta(), ext="mp4")
+
+        assert result.video == media / "StudioX" / "ABC-123" / "ABC-123.mp4"
+        assert result.thumb == media / "StudioX" / "ABC-123" / "thumb.jpg"
+        assert result.nfo == media / "StudioX" / "ABC-123" / "ABC-123.nfo"
+
+    def test_in_library_file_symlink_keeps_lexical_video_dir(self, media: Path):
+        """dest 已是指向库内源文件的符号链接时, {video_dir} 仍是 dest 所在目录."""
+        media.mkdir()
+        src = media / "incoming" / "ABC-123.mp4"
+        src.parent.mkdir()
+        src.write_bytes(b"x")
+        dest_dir = media / "StudioX" / "ABC-123"
+        dest_dir.mkdir(parents=True)
+        dest = dest_dir / "ABC-123.mp4"
+        dest.symlink_to(src)
+        wp = Library(name="t", path=str(media), video_template=VIDEO_TEMPLATE_DEFAULT)
+        result = resolve_paths(wp, _meta(), ext="mp4")
+        assert result.video == dest
+        assert result.thumb == dest_dir / "thumb.jpg"
+        assert result.nfo == dest_dir / "ABC-123.nfo"
+
+    def test_dir_symlink_escaping_library_rejected(self, media: Path, etc: Path):
+        """库内目录项指向库外时, 相对模板跟随后逃逸, 拒绝."""
+        media.mkdir()
+        etc.mkdir()
+        (media / "leak").symlink_to(etc)
+        wp = Library(name="t", path=str(media), video_template="leak/{number}/{number}.{ext}")
+        with pytest.raises(ValueError, match="路径越界"):
+            resolve_paths(wp, _meta(), ext="mp4")
+
+    def test_file_symlink_to_outside_rejected(self, media: Path, etc: Path):
+        """dest 文件符号链接指向库外时拒绝."""
+        media.mkdir()
+        etc.mkdir()
+        outside = etc / "secret.mp4"
+        outside.write_bytes(b"x")
+        dest_dir = media / "StudioX" / "ABC-123"
+        dest_dir.mkdir(parents=True)
+        (dest_dir / "ABC-123.mp4").symlink_to(outside)
+        wp = Library(name="t", path=str(media), video_template=VIDEO_TEMPLATE_DEFAULT)
+        with pytest.raises(ValueError, match="路径越界"):
+            resolve_paths(wp, _meta(), ext="mp4")
+
+
+class TestNormalizeLinkTemplate:
+    @pytest.mark.parametrize(
+        ("raw", "expected"),
+        [
+            (None, None),
+            ("", None),
+            ("   ", None),
+            ("/out/{number}/{number}.{ext}", "/out/{number}/{number}.{ext}"),
+            ("  /out/{number}.strm  ", "/out/{number}.strm"),
+        ],
+    )
+    def test_blank_is_unset(self, raw: str | None, expected: str | None):
+        assert normalize_link_template(raw) == expected
+
+
+class TestResolvePathsLink:
+    """link_template 渲染: 库外入口 + {link_dir} 换根."""
+
+    def test_unset_link_matches_video_dir(self, media: Path):
+        wp = Library(name="t", path=str(media), video_template="{studio}/{number}/{number}.{ext}")
+        result = resolve_paths(wp, _meta(), ext="mp4")
+        assert result.link is None
+        assert result.nfo == result.video.parent / "ABC-123.nfo"
+
+    def test_strm_forces_suffix_and_sidecars_follow_link_dir(self, media: Path, other: Path):
+        wp = Library(
+            name="t",
+            path=str(media),
+            video_template="{studio}/{number}/{number}.{ext}",
+            link_template=str(other / "{studio}" / "{number}" / "{number}.{ext}"),
+            link_mode=LinkMode.STRM,
+        )
+        result = resolve_paths(wp, _meta(), ext="mp4", safe_dirs=[other])
+        assert result.video == media / "StudioX" / "ABC-123" / "ABC-123.mp4"
+        assert result.link == other / "StudioX" / "ABC-123" / "ABC-123.strm"
+        assert result.nfo == other / "StudioX" / "ABC-123" / "ABC-123.nfo"
+        assert result.poster == other / "StudioX" / "ABC-123" / "poster.jpg"
+
+    def test_symlink_keeps_video_extension(self, media: Path, other: Path):
+        wp = Library(
+            name="t",
+            path=str(media),
+            video_template="{number}/{number}.{ext}",
+            link_template=str(other / "{number}" / "{number}.{ext}"),
+            link_mode=LinkMode.SYMLINK,
+        )
+        result = resolve_paths(wp, _meta(), ext="mkv", safe_dirs=[other])
+        assert result.link == other / "ABC-123" / "ABC-123.mkv"
+
+    def test_cd_in_link_only_if_template_asks(self, media: Path, other: Path):
+        wp = Library(
+            name="t",
+            path=str(media),
+            video_template="{number}/{number}[-CD{cd?}].{ext}",
+            link_template=str(other / "{number}" / "{number}[-CD{cd?}].{ext}"),
+            link_mode=LinkMode.STRM,
+        )
+        result = resolve_paths(wp, _meta(), ext="mp4", cd=2, safe_dirs=[other])
+        assert result.video == media / "ABC-123" / "ABC-123-CD2.mp4"
+        assert result.link == other / "ABC-123" / "ABC-123-CD2.strm"
+
+    def test_custom_video_dir_stays_with_real_video(self, media: Path, other: Path):
+        wp = Library(
+            name="t",
+            path=str(media),
+            video_template="{number}/{number}.{ext}",
+            link_template=str(other / "{number}" / "{number}.{ext}"),
+            nfo_template="{video_dir}/{number}.nfo",
+        )
+        result = resolve_paths(wp, _meta(), ext="mp4", safe_dirs=[other])
+        assert result.nfo == media / "ABC-123" / "ABC-123.nfo"
+        assert result.link == other / "ABC-123" / "ABC-123.strm"
+
+    def test_relative_link_rejected(self, media: Path):
+        wp = Library(
+            name="t",
+            path=str(media),
+            video_template="{number}/{number}.{ext}",
+            link_template="{number}/{number}.{ext}",
+        )
+        with pytest.raises(ValueError, match="库根之外"):
+            resolve_paths(wp, _meta(), ext="mp4")
+
+    def test_absolute_link_inside_library_rejected(self, media: Path):
+        wp = Library(
+            name="t",
+            path=str(media),
+            video_template="{number}/{number}.{ext}",
+            link_template=str(media / "links" / "{number}.{ext}"),
+        )
+        with pytest.raises(ValueError, match="库根之外"):
+            resolve_paths(wp, _meta(), ext="mp4")
+
+    def test_existing_link_to_library_video_keeps_link_outside(self, media: Path, other: Path):
+        """库外链接文件已指向库内视频时, 它自身仍判为库外.
+
+        判定的是文件落在哪里, 不是它指向的视频; 否则再次整理会失败, 不满足幂等.
+        """
+        wp = Library(
+            name="t",
+            path=str(media),
+            video_template="{studio}/{number}/{number}.{ext}",
+            link_template=str(other / "{number}" / "{number}.{ext}"),
+            link_mode=LinkMode.SYMLINK,
+        )
+        first = resolve_paths(wp, _meta(), ext="mp4", safe_dirs=[other])
+        assert first.link is not None
+        first.video.parent.mkdir(parents=True)
+        first.video.write_bytes(b"video")
+        first.link.parent.mkdir(parents=True)
+        first.link.symlink_to(first.video)
+
+        second = resolve_paths(wp, _meta(), ext="mp4", safe_dirs=[other])
+        assert second.link is not None
+        assert second.link == first.link
+        assert second.link.resolve() == first.video.resolve()
+
+    def test_link_dir_symlink_into_library_rejected(self, media: Path, other: Path):
+        """链接父目录是指向库内的符号链接时仍拒绝: 判定完整解析父目录链."""
+        inside = media / "links"
+        inside.mkdir(parents=True)
+        into_library = other / "into_library"
+        into_library.parent.mkdir(parents=True, exist_ok=True)
+        into_library.symlink_to(inside, target_is_directory=True)
+        wp = Library(
+            name="t",
+            path=str(media),
+            video_template="{number}/{number}.{ext}",
+            link_template=str(into_library / "{number}.{ext}"),
+            link_mode=LinkMode.SYMLINK,
+        )
+        with pytest.raises(ValueError, match="库根之外"):
+            resolve_paths(wp, _meta(), ext="mp4", safe_dirs=[other])
+
+    def test_subtitle_default_follows_link_dir(self, media: Path, other: Path):
+        wp = Library(
+            name="t",
+            path=str(media),
+            video_template="{studio}/{number}/{number}.{ext}",
+            link_template=str(other / "{studio}" / "{number}" / "{number}.{ext}"),
+        )
+        video = resolve_paths(wp, _meta(), ext="mp4", safe_dirs=[other])
+        assert video.link is not None
+        sub = resolve_subtitle_path(
+            wp,
+            _meta(),
+            Path("/inbox/MIDV-123.zh.srt"),
+            video_dir=video.video.parent,
+            link_dir=video.link.parent,
+            safe_dirs=[other],
+        )
+        assert sub == other / "StudioX" / "ABC-123" / "MIDV-123.zh.srt"
+
+
+class TestRenderedNamePlaceholders:
+    """{video_name} / {link_name}: 视频渲染后、链接渲染后分相位注入."""
+
+    def test_nfo_follows_video_name_with_cd_and_sub(self, media: Path):
+        wp = Library(
+            name="t",
+            path=str(media),
+            video_template="{number}/{number}[-CD{cd?}][-{sub?}].{ext}",
+            nfo_template="{video_dir}/{video_name}.nfo",
+        )
+        source = media / "inbox" / "MIDV-123-CD2-C.mp4"
+        info = parse_file_info(source)
+        result = resolve_paths(wp, _meta(), ext="mp4", source_path=source, file_info=info)
+        assert result.video == media / "ABC-123" / "ABC-123-CD2-C.mp4"
+        assert result.nfo == media / "ABC-123" / "ABC-123-CD2-C.nfo"
+
+    def test_link_template_uses_video_name(self, media: Path, other: Path):
+        wp = Library(
+            name="t",
+            path=str(media),
+            video_template="{number}/{number}[-CD{cd?}].{ext}",
+            link_template=str(other / "{number}" / "{video_name}.{ext}"),
+            link_mode=LinkMode.STRM,
+            nfo_template="{link_dir}/{link_name}.nfo",
+        )
+        result = resolve_paths(wp, _meta(), ext="mp4", cd=2, safe_dirs=[other])
+        assert result.video == media / "ABC-123" / "ABC-123-CD2.mp4"
+        assert result.link == other / "ABC-123" / "ABC-123-CD2.strm"
+        assert result.nfo == other / "ABC-123" / "ABC-123-CD2.nfo"
+
+    def test_link_template_uses_video_relpath(self, media: Path, other: Path):
+        wp = Library(
+            name="t",
+            path=str(media),
+            video_template="{studio}/{number}/{number}.{ext}",
+            link_template=str(other / "{video_relpath}"),
+            link_mode=LinkMode.STRM,
+        )
+        result = resolve_paths(wp, _meta(), ext="mp4", safe_dirs=[other])
+        assert result.video == media / "StudioX" / "ABC-123" / "ABC-123.mp4"
+        assert result.link == other / "StudioX" / "ABC-123" / "ABC-123.strm"
+
+    def test_unset_link_name_matches_video_name(self, media: Path):
+        wp = Library(
+            name="t",
+            path=str(media),
+            video_template="{number}/{number}[-CD{cd?}].{ext}",
+            nfo_template="{link_dir}/{link_name}.nfo",
+        )
+        result = resolve_paths(wp, _meta(), ext="mp4", cd=2)
+        assert result.link is None
+        assert result.nfo == media / "ABC-123" / "ABC-123-CD2.nfo"
+
+    def test_video_name_in_video_template_is_unknown(self, media: Path):
+        wp = Library(name="t", path=str(media), video_template="{video_name}/{number}.{ext}")
+        result = resolve_paths(wp, _meta(), ext="mp4")
+        assert result.video == media / "Unknown" / "ABC-123.mp4"
+
+    def test_link_name_in_link_template_is_unknown(self, media: Path, other: Path):
+        wp = Library(
+            name="t",
+            path=str(media),
+            video_template="{number}/{number}.{ext}",
+            link_template=str(other / "{link_name}.{ext}"),
+            link_mode=LinkMode.SYMLINK,
+        )
+        result = resolve_paths(wp, _meta(), ext="mp4", safe_dirs=[other])
+        assert result.link == other / "Unknown.mp4"
+
+    def test_subtitle_uses_video_name(self, media: Path):
+        wp = Library(
+            name="t",
+            path=str(media),
+            video_template="{number}/{number}[-CD{cd?}].{ext}",
+            subtitle_template="{link_dir}/{video_name}.{ext}",
+        )
+        video = resolve_paths(wp, _meta(), ext="mp4", cd=2)
+        sub = resolve_subtitle_path(
+            wp,
+            _meta(),
+            Path("/inbox/foo.srt"),
+            video_dir=video.video.parent,
+            video_name=video.video.stem,
+        )
+        assert sub == media / "ABC-123" / "ABC-123-CD2.srt"
+
+
+# あ = 3 字节. 66 字 = 198 字节 (不超过上限). 超限时预留 … (3 字节) → 65 字 + ….
+_JP_65 = "あ" * 65
+_JP_66 = "あ" * 66
+_JP_67 = "あ" * 67
+_JP_90 = "あ" * 90
+_CLIPPED_JP = f"{_JP_65}{PATH_FIELD_ELLIPSIS}"
+
+
+class _FieldClipCase(NamedTuple):
+    id: str
+    template: str
+    variables: dict[str, str]
+    expected: str
+
+
+FIELD_CLIP_CASES: tuple[_FieldClipCase, ...] = (
+    _FieldClipCase(
+        "title-cjk-over-clips",
+        "{title}",
+        {"title": _JP_90},
+        _CLIPPED_JP,
+    ),
+    _FieldClipCase(
+        "title-exact-200-ascii-kept",
+        "{title}",
+        {"title": "A" * PATH_FIELD_MAX_BYTES},
+        "A" * PATH_FIELD_MAX_BYTES,
+    ),
+    _FieldClipCase(
+        "title-201-ascii-clips",
+        "{title}",
+        {"title": "A" * (PATH_FIELD_MAX_BYTES + 1)},
+        f"{'A' * (PATH_FIELD_MAX_BYTES - len(PATH_FIELD_ELLIPSIS.encode('utf-8')))}{PATH_FIELD_ELLIPSIS}",
+    ),
+    _FieldClipCase(
+        "actor-clips",
+        "{actor}",
+        {"actor": _JP_90},
+        _CLIPPED_JP,
+    ),
+    _FieldClipCase(
+        "actors-joined-clips",
+        "{actors}",
+        {"actors": f"X,{_JP_90}"},
+        f"X,{_JP_65}{PATH_FIELD_ELLIPSIS}",
+    ),
+    _FieldClipCase(
+        "actress-clips",
+        "{actress}",
+        {"actress": _JP_90},
+        _CLIPPED_JP,
+    ),
+    _FieldClipCase(
+        "actresses-joined-clips",
+        "{actresses}",
+        {"actresses": f"X,{_JP_90}"},
+        f"X,{_JP_65}{PATH_FIELD_ELLIPSIS}",
+    ),
+    _FieldClipCase(
+        "number-not-clipped",
+        "{number}",
+        {"number": "N" * 250, "title": _JP_90},
+        "N" * 250,
+    ),
+    _FieldClipCase(
+        "studio-not-clipped",
+        "{studio}",
+        {"studio": "S" * 250, "title": _JP_90},
+        "S" * 250,
+    ),
+    _FieldClipCase(
+        "keeps-number-cd-ext-around-clipped-title",
+        "{number}-{title}[-CD{cd?}].{ext}",
+        {"number": "ABC-123", "title": _JP_90, "cd?": "1", "ext": "mp4"},
+        f"ABC-123-{_CLIPPED_JP}-CD1.mp4",
+    ),
+    _FieldClipCase(
+        "cjk-66-under-limit-kept",
+        "{title}",
+        {"title": _JP_66},
+        _JP_66,
+    ),
+    _FieldClipCase(
+        "cjk-67-clips-with-ellipsis",
+        "{title}",
+        {"title": _JP_67},
+        _CLIPPED_JP,
+    ),
+)
+
+
+@pytest.mark.parametrize("case", FIELD_CLIP_CASES, ids=lambda c: c.id)
+def test_path_engine_clips_title_actor_actors(case: _FieldClipCase) -> None:
+    rendered = PathEngine(case.template).render(TemplateContext.from_mapping(case.variables))
+    assert rendered == case.expected
+
+
+def test_resolve_paths_clips_long_title(media: Path) -> None:
+    """resolve_paths 走 PathEngine.fill, 超长 title 在填值时截断, 分集标记仍在."""
+    wp = Library(
+        name="t",
+        path=str(media),
+        video_template="{actor}/{title}/{number}-{title}[-CD{cd?}].{ext}",
+    )
+    result = resolve_paths(wp, _meta(title=_JP_90, actors=[_JP_90]), ext="mp4", cd=2)
+    assert result.video.parent.name == _CLIPPED_JP
+    assert result.video.parent.parent.name == _CLIPPED_JP
+    assert result.video.name == f"ABC-123-{_CLIPPED_JP}-CD2.mp4"
+    assert len(result.video.parent.name.encode("utf-8")) <= PATH_FIELD_MAX_BYTES
+    assert len(result.video.name.encode("utf-8")) <= 255
+
+
+class _AnchorCase(NamedTuple):
+    id: str
+    template: str
+    variables: dict[str, str]
+    expected: str
+
+
+ANCHOR_CASES: tuple[_AnchorCase, ...] = (
+    _AnchorCase(
+        "unc-value-keeps-share-anchor",
+        "{link_dir}/thumb.jpg",
+        {"link_dir": r"\\mio_NAS\CloudNAS\115media\JAV\EBWH-353-C 小花のん"},
+        "//mio_NAS/CloudNAS/115media/JAV/EBWH-353-C 小花のん/thumb.jpg",
+    ),
+    _AnchorCase(
+        "unc-template-keeps-share-anchor",
+        r"\\mio_NAS\CloudNAS\115media\{number}\{number}.{ext}",
+        {"number": "ABC-123", "ext": "mp4"},
+        "//mio_NAS/CloudNAS/115media/ABC-123/ABC-123.mp4",
+    ),
+    _AnchorCase(
+        "unc-anchor-collapses-empty-segment",
+        "{link_dir}/{video_relpath}/thumb.jpg",
+        {"link_dir": r"\\mio_NAS\CloudNAS\media\ABC-123", "video_relpath": ""},
+        "//mio_NAS/CloudNAS/media/ABC-123/thumb.jpg",
+    ),
+    _AnchorCase(
+        "extended-unc-prefix-kept",
+        r"\\?\UNC\mio_NAS\CloudNAS\{number}\{number}.strm",
+        {"number": "ABC-123"},
+        "//?/UNC/mio_NAS/CloudNAS/ABC-123/ABC-123.strm",
+    ),
+    _AnchorCase(
+        "drive-anchor-kept",
+        r"C:\media\{number}\{number}.{ext}",
+        {"number": "ABC-123", "ext": "mp4"},
+        "C:/media/ABC-123/ABC-123.mp4",
+    ),
+    _AnchorCase(
+        "root-anchor-collapses-empty-segments",
+        "/media//{number}//{number}.{ext}",
+        {"number": "ABC-123", "ext": "mp4"},
+        "/media/ABC-123/ABC-123.mp4",
+    ),
+    _AnchorCase(
+        "empty-placeholder-keeps-relative",
+        "{studio}/{number}.{ext}",
+        {"studio": "", "number": "ABC-123", "ext": "mp4"},
+        "ABC-123.mp4",
+    ),
+)
+
+
+@pytest.mark.parametrize("case", ANCHOR_CASES, ids=lambda c: c.id)
+def test_path_engine_keeps_path_anchor(case: _AnchorCase) -> None:
+    """锚 (UNC 共享 / 盘符 / 根) 原样保留, 只折叠锚之后的空段."""
+    rendered = PathEngine(case.template).render(TemplateContext.from_mapping(case.variables))
+    assert rendered == case.expected
+
+
+class _SegmentCase(NamedTuple):
+    id: str
+    template: str
+    variables: dict[str, str]
+    expected: str
+
+
+# Windows 创建时: 段内控制字符 → ERROR_INVALID_NAME; 段尾的 . 与空格 → 静默剥除.
+SEGMENT_CASES: tuple[_SegmentCase, ...] = (
+    _SegmentCase(
+        "control-char-becomes-space",
+        "{title}/{number}.{ext}",
+        {"title": "line1\nline2", "number": "ABC-123", "ext": "mp4"},
+        "line1 line2/ABC-123.mp4",
+    ),
+    _SegmentCase(
+        "nul-and-del-become-space",
+        "{title}/{number}.{ext}",
+        {"title": "a\x00b\x7fc", "number": "ABC-123", "ext": "mp4"},
+        "a b c/ABC-123.mp4",
+    ),
+    _SegmentCase(
+        "field-trailing-dots-removed",
+        "{studio}/{number}/{number}.{ext}",
+        {"studio": "Studio...", "number": "ABC-123", "ext": "mp4"},
+        "Studio/ABC-123/ABC-123.mp4",
+    ),
+    _SegmentCase(
+        "literal-trailing-space-removed",
+        "{number} {title}/{number}.{ext}",
+        {"number": "ABC-123", "title": "", "ext": "mp4"},
+        "ABC-123/ABC-123.mp4",
+    ),
+    _SegmentCase(
+        "dots-only-segment-dropped",
+        "{title}/{number}.{ext}",
+        {"title": "...", "number": "ABC-123", "ext": "mp4"},
+        "ABC-123.mp4",
+    ),
+    _SegmentCase(
+        "file-stem-trailing-dot-removed",
+        "{number}.{ext}",
+        {"number": "ABC-123", "ext": ""},
+        "ABC-123",
+    ),
+    _SegmentCase(
+        "control-char-in-literal-becomes-space",
+        "a\x01b/{number}.{ext}",
+        {"number": "ABC-123", "ext": "mp4"},
+        "a b/ABC-123.mp4",
+    ),
+    _SegmentCase(
+        "leading-space-kept",
+        " {number}/{number}.{ext}",
+        {"number": "ABC-123", "ext": "mp4"},
+        " ABC-123/ABC-123.mp4",
+    ),
+    _SegmentCase(
+        "dot-segment-kept",
+        "{number}/./{number}.{ext}",
+        {"number": "ABC-123", "ext": "mp4"},
+        "ABC-123/./ABC-123.mp4",
+    ),
+    _SegmentCase(
+        "dotdot-segment-kept",
+        "{number}/../{number}.{ext}",
+        {"number": "ABC-123", "ext": "mp4"},
+        "ABC-123/../ABC-123.mp4",
+    ),
+)
+
+
+@pytest.mark.parametrize("case", SEGMENT_CASES, ids=lambda c: c.id)
+def test_path_engine_normalizes_each_segment(case: _SegmentCase) -> None:
+    """每个路径段按 Windows 创建结果对齐: 控制字符替换为空格, 段尾的 . 与空格去掉, 空段丢弃.
+
+    ``.`` 与 ``..`` 原样保留, 逃逸检查依赖它们.
+    """
+    rendered = PathEngine(case.template).render(TemplateContext.from_mapping(case.variables))
+    assert rendered == case.expected
+
+
+class TestSegmentSanitize:
+    """清洗结果就是落在磁盘上的名字: 目录段含控制字符或段尾的 . 时, 建目录不再失败或改名."""
+
+    def test_metadata_title_and_studio(self, media: Path):
+        wp = Library(name="t", path=str(media), video_template="{studio}/{number} {title}/{number}.{ext}")
+        result = resolve_paths(wp, _meta(title="line1\nline2...", studio="Studio..."), ext="mp4")
+
+        result.video.parent.mkdir(parents=True)
+        assert result.video.parent.is_dir()
+        assert [entry.name for entry in media.iterdir()] == ["Studio"]
+        assert result.video.parent.name == "ABC-123 line1 line2"
+
+    def test_raw_dir_from_source_path(self, media: Path):
+        """{raw_dir} 不经过字段清洗, 由路径段规范化兜底."""
+        wp = Library(name="t", path=str(media), video_template="{raw_dir}/{number}.{ext}")
+        result = resolve_paths(wp, _meta(), ext="mp4", source_path=media / "A\nB" / "C.mp4")
+
+        assert result.video == media / "A B" / "ABC-123.mp4"
+
+
+class _ActressCase(NamedTuple):
+    desc: str
+    actors: list[str]
+    genders: dict[str, ActorGender] | None
+    expect: list[str]
+
+
+ACTRESS_CASES: tuple[_ActressCase, ...] = (
+    _ActressCase("空名单", [], None, []),
+    _ActressCase("无性别表视为未识别", ["A", "B"], None, ["A", "B"]),
+    _ActressCase("空性别表同样保留", ["A"], {}, ["A"]),
+    _ActressCase("排除明确男性", ["F", "M", "U"], {"F": ActorGender.FEMALE, "M": ActorGender.MALE}, ["F", "U"]),
+    _ActressCase("全是男性", ["M1", "M2"], {"M1": ActorGender.MALE, "M2": ActorGender.MALE}, []),
+    _ActressCase(
+        "保序",
+        ["M", "F1", "F2"],
+        {"M": ActorGender.MALE, "F1": ActorGender.FEMALE, "F2": ActorGender.FEMALE},
+        ["F1", "F2"],
+    ),
+)
+
+
+@pytest.mark.parametrize("case", ACTRESS_CASES, ids=lambda c: c.desc)
+def test_actress_names(case: _ActressCase) -> None:
+    assert actress_names(case.actors, case.genders) == case.expect
+
+
+@pytest.mark.parametrize(
+    ("actors", "genders", "actress", "actresses"),
+    [
+        (["F", "M"], {"F": ActorGender.FEMALE, "M": ActorGender.MALE}, "F", "F"),
+        (["M"], {"M": ActorGender.MALE}, "Unknown", "Unknown"),
+        ([], None, "Unknown", "Unknown"),
+        (["A", "B"], None, "A", "A,B"),
+    ],
+    ids=["drop-male", "all-male", "empty", "unknown-kept"],
+)
+def test_from_metadata_actress_placeholders(
+    actors: list[str],
+    genders: dict[str, ActorGender] | None,
+    actress: str,
+    actresses: str,
+) -> None:
+    ctx = TemplateContext.from_metadata(_meta(actors=actors), actor_genders=genders)
+    assert ctx.variables["actress"] == actress
+    assert ctx.variables["actresses"] == actresses
+
+
+@pytest.mark.parametrize(
+    ("number", "prefix", "suffix"),
+    [
+        ("ABC-123", "ABC", "123"),
+        ("ABS-001", "ABS", "001"),
+        ("MKY-HS-001", "MKY-HS", "001"),
+        ("FC2-1234567", "FC2", "1234567"),
+    ],
+    ids=["hyphen", "zero-pad", "compound-prefix", "fc2"],
+)
+def test_prefix_suffix_placeholders(media: Path, number: str, prefix: str, suffix: str) -> None:
+    wp = Library(name="t", path=str(media), video_template="{prefix}/{suffix}/{number}.{ext}")
+    result = resolve_paths(wp, _meta(number=number), ext="mp4")
+    assert result.video == media / prefix / suffix / f"{number}.mp4"
+
+
+def test_resolve_paths_uses_actress_placeholder(media: Path) -> None:
+    wp = Library(name="t", path=str(media), video_template="{actresses}/{number}.{ext}")
+    result = resolve_paths(
+        wp,
+        _meta(actors=["F", "M"]),
+        ext="mp4",
+        actor_genders={"F": ActorGender.FEMALE, "M": ActorGender.MALE},
+    )
+    assert result.video == media / "F" / "ABC-123.mp4"

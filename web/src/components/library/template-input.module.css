@@ -1,0 +1,54 @@
+.shell {
+  position: relative;
+}
+
+.highlight {
+  position: absolute;
+  z-index: 1;
+  overflow: hidden;
+  pointer-events: none;
+  color: var(--mantine-color-text);
+}
+
+.highlightInner {
+  white-space: pre;
+  display: block;
+  width: max-content;
+  min-width: 100%;
+}
+
+.input {
+  position: relative;
+  z-index: 2;
+  caret-color: var(--mantine-color-text);
+}
+
+.inputFilled {
+  color: transparent;
+  background-color: transparent;
+}
+
+.group {
+  color: light-dark(var(--mantine-color-orange-7), var(--mantine-color-orange-4));
+}
+
+.brace,
+.name {
+  color: light-dark(var(--mantine-color-blue-7), var(--mantine-color-blue-4));
+}
+
+.punct {
+  color: var(--mantine-color-dimmed);
+}
+
+.mapKey {
+  color: light-dark(var(--mantine-color-teal-7), var(--mantine-color-teal-4));
+}
+
+.mapValue {
+  color: light-dark(var(--mantine-color-grape-7), var(--mantine-color-grape-4));
+}
+
+.error {
+  color: var(--mantine-color-red-6);
+}

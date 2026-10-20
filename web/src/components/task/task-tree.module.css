@@ -1,0 +1,271 @@
+/* 全宽网格只让 identity 随深度缩进; 展开脊线用状态色细线, 行与行之间用分隔线. */
+
+.forest,
+.kids {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.forest {
+  --tree-line: light-dark(var(--mantine-color-gray-4), var(--mantine-color-dark-3));
+  --row-rule: light-dark(var(--mantine-color-gray-3), var(--mantine-color-dark-4));
+  --tree-indent: 28px;
+  --row-cols: minmax(12rem, 1fr) minmax(6rem, 12rem) 6rem 4.5rem 4.5rem 5rem;
+  --task-accent: var(--mantine-color-gray-5);
+}
+
+/* 窄屏隐藏 error / 时长 / #id 三列, 网格随之只保留 identity / 状态 / 行内操作. */
+@media (max-width: 47.99em) {
+  .forest {
+    --row-cols: minmax(0, 1fr) auto auto;
+  }
+}
+
+.node {
+  position: relative;
+  list-style: none;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: var(--row-cols);
+  column-gap: 10px;
+  align-items: center;
+  height: 3rem;
+  padding: 0 8px 0 6px;
+  border-bottom: 1px solid var(--row-rule);
+  cursor: pointer;
+  user-select: none;
+  position: relative;
+}
+
+/* 六列出行的宽度下界只在 sm 及以上成立: 窄屏无此下界, 行宽随容器收敛. */
+@media (min-width: 48em) {
+  .row {
+    min-width: 42rem;
+  }
+}
+
+.row[data-status="queued"] {
+  --task-accent: light-dark(var(--mantine-color-gray-5), var(--mantine-color-gray-6));
+}
+
+.row[data-status="running"] {
+  --task-accent: var(--mantine-color-blue-6);
+}
+
+.row[data-status="done"] {
+  --task-accent: var(--mantine-color-teal-6);
+}
+
+.row[data-status="failed"] {
+  --task-accent: var(--mantine-color-red-6);
+}
+
+.row:hover,
+.row[data-open="true"] {
+  background: var(--mantine-color-default-hover);
+}
+
+.row:focus-visible {
+  outline: 2px solid var(--mantine-color-brand-6);
+  outline-offset: -2px;
+}
+
+.identity {
+  display: flex;
+  align-items: stretch;
+  align-self: stretch;
+  gap: 8px;
+  min-width: 0;
+}
+
+.identity > :not(.guides) {
+  align-self: center;
+}
+
+.guides {
+  display: flex;
+  flex-shrink: 0;
+  align-self: stretch;
+  height: 100%;
+}
+
+.riser,
+.connector {
+  width: var(--tree-indent);
+  position: relative;
+  flex-shrink: 0;
+  height: 100%;
+}
+
+.riser[data-cont]::before {
+  content: "";
+  position: absolute;
+  left: 8px;
+  top: 0;
+  bottom: 0;
+  border-left: 2px dashed var(--tree-line);
+}
+
+.connector {
+  --task-accent: var(--tree-line);
+}
+
+.connector[data-status="queued"] {
+  --task-accent: light-dark(var(--mantine-color-gray-5), var(--mantine-color-gray-6));
+}
+
+.connector[data-status="running"] {
+  --task-accent: var(--mantine-color-blue-6);
+}
+
+.connector[data-status="done"] {
+  --task-accent: var(--mantine-color-teal-6);
+}
+
+.connector[data-status="failed"] {
+  --task-accent: var(--mantine-color-red-6);
+}
+
+.connector::before {
+  content: "";
+  position: absolute;
+  left: 8px;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--task-accent);
+}
+
+.connector[data-last]::before {
+  bottom: 50%;
+}
+
+.connector::after {
+  content: "";
+  position: absolute;
+  left: 8px;
+  top: 50%;
+  width: calc(var(--tree-indent) - 8px);
+  height: 2px;
+  background: var(--task-accent);
+}
+
+.chevron {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  color: var(--mantine-color-dimmed);
+  transition: transform 120ms ease;
+}
+
+.chevron[data-open="true"] {
+  transform: rotate(90deg);
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  margin: auto 0;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--task-accent);
+}
+
+.dot[data-status="running"] {
+  box-shadow: 0 0 0 0 var(--task-accent);
+  animation: pulse 1.6s ease-out infinite;
+}
+
+@keyframes pulse {
+  70% {
+    box-shadow: 0 0 0 6px transparent;
+  }
+}
+
+.title {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.cell {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.cellNum {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.cellEnd {
+  justify-self: end;
+}
+
+.progress {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  grid-column: 1 / -1;
+  pointer-events: none;
+}
+
+.pane {
+  overflow: auto;
+  min-height: 0;
+  background: light-dark(var(--mantine-color-gray-0), var(--mantine-color-dark-7));
+}
+
+.detail {
+  position: relative;
+}
+
+.paneRiser {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 0;
+  border-left: 2px dashed var(--tree-line);
+  pointer-events: none;
+}
+
+.spine {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--task-accent);
+  pointer-events: none;
+}
+
+.spine[data-status="queued"] {
+  background: light-dark(var(--mantine-color-gray-5), var(--mantine-color-gray-6));
+}
+
+.spine[data-status="running"] {
+  background: var(--mantine-color-blue-6);
+}
+
+.spine[data-status="done"] {
+  background: var(--mantine-color-teal-6);
+}
+
+.spine[data-status="failed"] {
+  background: var(--mantine-color-red-6);
+}
+
+.ghost {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 2rem;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--row-rule);
+}

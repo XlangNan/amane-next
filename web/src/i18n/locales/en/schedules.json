@@ -1,0 +1,86 @@
+{
+  "title": "Scheduled Tasks",
+  "empty": "No schedules configured yet",
+  "newSchedule": "New Schedule",
+  "editSchedule": "Edit Schedule",
+  "fields": {
+    "name": "Name",
+    "namePlaceholder": "e.g. Nightly Full Scan",
+    "cron": "Schedule",
+    "enabled": "Enabled"
+  },
+  "cron": {
+    "modes": {
+      "daily": "Daily",
+      "weekly": "Weekly",
+      "monthly": "Monthly",
+      "interval": "Interval",
+      "custom": "Advanced"
+    },
+    "every": "Every",
+    "units": {
+      "minutes": "minutes",
+      "hours": "hours"
+    },
+    "onDays": "Days",
+    "onDay": "Day",
+    "hour": "Hour",
+    "minute": "Minute",
+    "minuteOfHour": "At minute",
+    "localTime": "Local time",
+    "customPlaceholder": "minute hour day month weekday",
+    "customHint": "Standard 5-field Cron, same as Linux crontab. Times are UTC",
+    "dayJoiner": ", ",
+    "weekdays": {
+      "sun": "Sun",
+      "mon": "Mon",
+      "tue": "Tue",
+      "wed": "Wed",
+      "thu": "Thu",
+      "fri": "Fri",
+      "sat": "Sat"
+    },
+    "summary": {
+      "intervalMinutes": "Every {{every}} minutes",
+      "intervalHours": "Every {{every}} hours (at minute {{minute}})",
+      "intervalHoursOnHour": "Every hour (at minute {{minute}})",
+      "daily": "Every day at {{time}}",
+      "weekly": "{{days}} at {{time}}",
+      "monthly": "Day {{day}} of each month at {{time}}"
+    }
+  },
+  "payload": {
+    "title": "Parameters",
+    "joiner": " · ",
+    "listJoiner": ", ",
+    "unset": "Use configured default",
+    "yes": "Yes",
+    "no": "No",
+    "cleanup": {
+      "none": "Neither action enabled"
+    },
+    "upscale": {
+      "limit": "Up to {{limit}} per run",
+      "maxDim": "Longest side below {{value}}",
+      "maxBytes": "Smaller than {{value}} bytes"
+    },
+    "r18_import": {
+      "skipUnchanged": "Skip if remote unchanged"
+    },
+    "rescrape": {
+      "limit": "{{limit}} per target",
+      "minAge": "Not updated for {{days}} days"
+    }
+  },
+  "labels": {
+    "nextRun": "Next",
+    "never": "Never"
+  },
+  "actions": {
+    "trigger": "Trigger"
+  },
+  "confirm": {
+    "deleteTitle": "Delete Schedule",
+    "deleteMessage": "Are you sure you want to delete this schedule? This action cannot be undone"
+  }
+}

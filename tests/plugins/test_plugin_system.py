@@ -1,0 +1,666 @@
+"""Film source plugin API and runtime catalog tests."""
+
+from pathlib import Path
+from typing import cast
+
+import pytest
+from pydantic import BaseModel, ConfigDict, ValidationError
+
+from amane.config import HotSettings, PluginConfig
+from amane.crawlers.factory import CrawlerFactory
+from amane.crawlers.http import HttpClient
+from amane.crawlers.models import FetchOptions, MediaMetadata, SearchQuery
+from amane.plugin import (
+    FilmSourcePlugin,
+    FilmSourceProvider,
+    PlaybackPlugin,
+    PlaybackProvider,
+    PluginContext,
+    SourceCapability,
+    SourceDescriptor,
+    SourceTrait,
+    is_external_source_id,
+    validate_external_source_id,
+)
+from amane.plugins.manager import PluginManager
+from amane.plugins.packaging import PLUGIN_ENTRY, sources_root
+
+
+def write_plugin(
+    data_dir: Path,
+    plugin_id: str,
+    *,
+    body: str | None = None,
+    directory_name: str | None = None,
+    api_version: str | None = None,
+) -> Path:
+    """Write ``plugin.py`` under ``plugins/sources/<directory_name>/``."""
+    folder = directory_name or plugin_id
+    plugin_dir = sources_root(data_dir) / folder
+    plugin_dir.mkdir(parents=True, exist_ok=True)
+    source = body if body is not None else plugin_source(plugin_id, api_version=api_version)
+    (plugin_dir / PLUGIN_ENTRY).write_text(source, encoding="utf-8")
+    return plugin_dir
+
+
+def plugin_source(
+    plugin_id: str,
+    *,
+    class_name: str = "Plugin",
+    api_version: str | None = None,
+    content_types: str = '{"censored"}',
+    traits: str | None = None,
+) -> str:
+    version_arg = f", api_version={api_version!r}" if api_version is not None else ""
+    traits_arg = f", traits=frozenset({{{traits}}})" if traits is not None else ""
+    return f"""
+from pydantic import BaseModel, ConfigDict
+
+from amane.plugin import (
+    FilmSourcePlugin,
+    FilmSourceProvider,
+    MediaMetadata,
+    PluginContext,
+    SearchQuery,
+    SourceCapability,
+    SourceDescriptor
+)
+
+
+class _Config(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    endpoint: str = "https://plugin.example.test"
+
+
+class _Provider(FilmSourceProvider):
+    async def fetch(self, query: SearchQuery, options=None) -> MediaMetadata:
+        return MediaMetadata(number=query.number, title="Plugin result")
+
+
+class {class_name}(FilmSourcePlugin):
+    config_model = _Config
+
+    @classmethod
+    def descriptor(cls) -> SourceDescriptor:
+        return SourceDescriptor(
+            id={plugin_id!r},
+            name="Fake plugin",
+            version="0.1.0",
+            capabilities=frozenset({{SourceCapability.FILM_METADATA}}),
+            content_types=frozenset({content_types}),
+            urls=("https://plugin.example.test",){version_arg}{traits_arg},
+        )
+
+    def build(self, context: PluginContext, config: BaseModel) -> FilmSourceProvider:
+        return _Provider()
+"""
+
+
+class FakePluginConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    endpoint: str = "https://plugin.example.test"
+
+
+class FakeProvider(FilmSourceProvider):
+    async def fetch(self, query: SearchQuery, options: FetchOptions | None = None) -> MediaMetadata:
+        return MediaMetadata(number=query.number, title="Plugin result")
+
+
+class FakePlugin(FilmSourcePlugin):
+    config_model = FakePluginConfig
+
+    @classmethod
+    def descriptor(cls) -> SourceDescriptor:
+        return SourceDescriptor(
+            id="acme.fake",
+            name="Fake plugin",
+            version="0.1.0",
+            capabilities=frozenset({SourceCapability.FILM_METADATA}),
+            content_types=frozenset({"censored"}),
+            urls=("https://plugin.example.test",),
+            traits=frozenset({"multi_language"}),
+        )
+
+    def build(self, context: PluginContext, config: BaseModel) -> FilmSourceProvider:
+        assert context.source_id == "acme.fake"
+        assert context.data_dir.name == "acme.fake"
+        assert context.data_dir.parent.name == "plugins"
+        assert context.data_dir.is_dir()
+        assert isinstance(config, FakePluginConfig)
+        return FakeProvider()
+
+
+class _FakeHttp:
+    web_client = object()
+
+
+def plugin_manager() -> PluginManager:
+    return PluginManager({"acme.fake": FakePlugin()}, [])
+
+
+def test_plugin_manager_discovers_dropins(tmp_path: Path) -> None:
+    write_plugin(tmp_path, "acme.fake")
+    write_plugin(tmp_path, "acme.broken", body="class Plugin:\n    pass\n")
+    write_plugin(tmp_path, "acme.old", api_version="0")
+    write_plugin(tmp_path, "fakesource", directory_name="fakesource")
+    write_plugin(tmp_path, "plugin.squat", directory_name="plugin.squat")
+
+    manager = PluginManager.discover(tmp_path)
+    assert manager.has_plugin("acme.fake")
+    origin = manager.origin("acme.fake")
+    assert origin is not None
+    assert origin.plugin_id == "acme.fake"
+    assert Path(origin.path).name == "acme.fake"
+    names = {failure.name for failure in manager.failures}
+    assert names == {"acme.broken", "acme.old", "fakesource", "plugin.squat"}
+    assert any("FilmSourcePlugin or PlaybackPlugin" in failure.error for failure in manager.failures)
+    assert any("unsupported plugin API version" in failure.error for failure in manager.failures)
+    assert any("namespace.local" in failure.error for failure in manager.failures)
+    assert any("reserved" in failure.error for failure in manager.failures)
+
+
+def test_unknown_trait_does_not_fail_load(tmp_path: Path) -> None:
+    """未知 trait 只记 warning 并忽略, 插件仍加载 — 宿主与插件版本可以不一致."""
+    write_plugin(tmp_path, "acme.future", body=plugin_source("acme.future", traits='"not_a_trait"'))
+    manager = PluginManager.discover(tmp_path)
+    assert manager.has_plugin("acme.future")
+    assert not manager.failures
+
+
+def test_discover_rejects_descriptor_id_mismatch(tmp_path: Path) -> None:
+    write_plugin(tmp_path, "acme.fake", directory_name="acme.other")
+    manager = PluginManager.discover(tmp_path)
+    assert not manager.has_plugin("acme.fake")
+    assert not manager.has_plugin("acme.other")
+    assert any("does not match directory name" in failure.error for failure in manager.failures)
+
+
+def test_source_descriptor_rejects_unstable_ids() -> None:
+    with pytest.raises(ValidationError, match="source id"):
+        SourceDescriptor(id="FakePlugin", name="Invalid")
+
+
+def test_builtin_descriptor_mirrors_profile_facts() -> None:
+    """内置来源的声明经 descriptor 镜像: 引擎只读目录, 不按来源种类区分."""
+    manager = PluginManager({}, [])
+    official = manager.descriptor("official")
+    javdb = manager.descriptor("javdb")
+    theporndb = manager.descriptor("theporndb")
+    assert official is not None
+    assert javdb is not None
+    assert theporndb is not None
+    assert SourceTrait.NEEDS_PARTIAL in official.traits
+    assert javdb.traits == frozenset()
+    assert SourceTrait.USES_FILE_HASH in theporndb.traits
+
+
+class TraitPlugin(FakePlugin):
+    """在 descriptor 里声明 NEEDS_PARTIAL 的外部插件."""
+
+    @classmethod
+    def descriptor(cls) -> SourceDescriptor:
+        return super().descriptor().model_copy(update={"traits": frozenset({"needs_partial"})})
+
+
+def test_descriptor_trait_covers_external_plugin() -> None:
+    """外部插件声明的 trait 与内置来源进入同一份目录."""
+    manager = PluginManager({"acme.fake": TraitPlugin()}, [])
+    plugin = manager.descriptor("acme.fake")
+    official = manager.descriptor("official")
+    assert plugin is not None
+    assert official is not None
+    assert SourceTrait.NEEDS_PARTIAL in plugin.traits
+    assert SourceTrait.NEEDS_PARTIAL in official.traits
+
+
+@pytest.mark.parametrize(
+    ("source_id", "ok"),
+    [
+        pytest.param("acme.fake", True, id="namespaced"),
+        pytest.param("acme.foo.bar", True, id="nested-local"),
+        pytest.param("javdb", False, id="builtin-single-segment"),
+        pytest.param("fakesource", False, id="unnamespaced"),
+        pytest.param("plugin.fake", False, id="reserved-plugin"),
+        pytest.param("amane.foo", False, id="reserved-amane"),
+        pytest.param("javdb.mirror", False, id="builtin-as-namespace"),
+        pytest.param("acme.", False, id="empty-local"),
+        pytest.param(".fake", False, id="empty-namespace"),
+    ],
+)
+def test_external_source_id_rules(source_id: str, ok: bool) -> None:
+    assert is_external_source_id(source_id) is ok
+    if ok:
+        assert validate_external_source_id(source_id) == source_id
+        return
+    with pytest.raises(ValueError):
+        validate_external_source_id(source_id)
+
+
+@pytest.mark.parametrize(
+    ("payload", "require_available", "error"),
+    [
+        pytest.param(
+            {
+                "scraping": {"content_routes": {"censored": ["acme.fake"]}},
+                "plugins": {"acme.fake": {"enabled": False}},
+            },
+            True,
+            None,
+            id="disabled-plugin-may-stay-in-route",
+        ),
+        pytest.param(
+            {
+                "scraping": {"field_priority": {"title": ["acme.fake"]}},
+                "plugins": {"acme.fake": {"enabled": False}},
+            },
+            True,
+            None,
+            id="disabled-plugin-may-stay-in-field-priority",
+        ),
+        pytest.param(
+            {
+                "scraping": {"field_blacklist": {"title": ["acme.fake"]}},
+                "plugins": {"acme.fake": {"enabled": False}},
+            },
+            True,
+            None,
+            id="disabled-plugin-may-stay-in-field-blacklist",
+        ),
+        pytest.param(
+            {"plugins": {"acme.fake": {"enabled": False, "config": {"unknown": True}}}},
+            True,
+            None,
+            id="disabled-plugin-skips-config-validation",
+        ),
+        pytest.param(
+            {"scraping": {"content_routes": {"censored": ["acme.gone"]}}},
+            False,
+            None,
+            id="missing-plugin-allowed-when-optional",
+        ),
+        pytest.param(
+            {"scraping": {"content_routes": {"censored": ["acme.gone"]}}},
+            True,
+            "unavailable source",
+            id="missing-plugin-rejected-when-required",
+        ),
+        pytest.param(
+            {"scraping": {"content_routes": {"fc2": ["acme.fake"]}}},
+            True,
+            "does not support content type",
+            id="content-type-mismatch",
+        ),
+        pytest.param(
+            {"plugins": {"javdb": {"enabled": True}}},
+            True,
+            "namespaced source id",
+            id="plugin-key-must-be-namespaced",
+        ),
+        pytest.param(
+            {"plugins": {"plugin.foo": {"enabled": True}}},
+            True,
+            "namespaced source id",
+            id="plugin-prefix-is-reserved-namespace",
+        ),
+        pytest.param(
+            {"plugins": {"acme.gone": {"enabled": True}}},
+            True,
+            "unavailable plugin",
+            id="config-for-missing-plugin-rejected-when-required",
+        ),
+        pytest.param(
+            {"plugins": {"acme.gone": {"enabled": True}}},
+            False,
+            None,
+            id="config-for-missing-plugin-allowed-when-optional",
+        ),
+        pytest.param(
+            {
+                "scraping": {"field_priority": {"title": ["acme.gone"]}},
+            },
+            False,
+            None,
+            id="missing-plugin-in-field-priority-optional",
+        ),
+        pytest.param(
+            {
+                "scraping": {"field_priority": {"title": ["acme.gone"]}},
+            },
+            True,
+            "unavailable source",
+            id="missing-plugin-in-field-priority-required",
+        ),
+        pytest.param(
+            {
+                "scraping": {"field_blacklist": {"title": ["acme.gone"]}},
+            },
+            False,
+            None,
+            id="missing-plugin-in-field-blacklist-optional",
+        ),
+        pytest.param(
+            {
+                "scraping": {"field_blacklist": {"title": ["acme.gone"]}},
+            },
+            True,
+            "unavailable source",
+            id="missing-plugin-in-field-blacklist-required",
+        ),
+    ],
+)
+def test_validate_hot_settings(payload: dict[str, object], require_available: bool, error: str | None) -> None:
+    hot = HotSettings.model_validate(payload)
+    if error is None:
+        plugin_manager().validate_hot_settings(hot, require_available=require_available)
+        return
+    with pytest.raises(ValueError, match=error):
+        plugin_manager().validate_hot_settings(hot, require_available=require_available)
+
+
+def test_validate_hot_settings_rejects_invalid_plugin_config() -> None:
+    hot = HotSettings.model_validate({"plugins": {"acme.fake": {"config": {"unknown": True}}}})
+    with pytest.raises(ValidationError):
+        plugin_manager().validate_hot_settings(hot)
+
+
+def test_plugin_manager_validates_routes_config_and_schema() -> None:
+    manager = plugin_manager()
+    hot = HotSettings.model_validate(
+        {
+            "scraping": {"content_routes": {"censored": ["acme.fake"]}},
+            "plugins": {"acme.fake": {"config": {"endpoint": "https://configured.test"}}},
+        }
+    )
+
+    manager.validate_hot_settings(hot)
+    schema = manager.plugin_config_schema("acme.fake")
+    properties = schema.get("properties")
+    assert isinstance(properties, dict)
+    endpoint = properties.get("endpoint")
+    assert isinstance(endpoint, dict)
+    assert endpoint.get("default") == "https://plugin.example.test"
+
+
+def test_plugin_manager_augments_route_schema() -> None:
+    manager = plugin_manager()
+    schema = manager.augment_config_schema(HotSettings.model_json_schema())
+    defs = schema.get("$defs")
+    assert isinstance(defs, dict)
+    scraping = defs.get("ScrapingConfig")
+    assert isinstance(scraping, dict)
+    properties = scraping.get("properties")
+    assert isinstance(properties, dict)
+    content_routes = properties.get("content_routes")
+    assert isinstance(content_routes, dict)
+    additional = content_routes.get("additionalProperties")
+    assert isinstance(additional, dict)
+    items = additional.get("items")
+    assert isinstance(items, dict)
+    enum = items.get("enum")
+    assert isinstance(enum, list)
+    assert "acme.fake" in enum
+    for field_name in ("field_priority", "field_blacklist"):
+        field = properties.get(field_name)
+        assert isinstance(field, dict)
+        additional = field.get("additionalProperties")
+        assert isinstance(additional, dict)
+        items = additional.get("items")
+        assert isinstance(items, dict)
+        field_enum = items.get("enum")
+        assert isinstance(field_enum, list)
+        assert "acme.fake" in field_enum
+    properties = schema.get("properties")
+    assert isinstance(properties, dict)
+    plugins = properties.get("plugins")
+    assert isinstance(plugins, dict)
+    assert plugins.get("x-hidden") is True
+
+
+@pytest.mark.asyncio
+async def test_factory_builds_and_caches_plugin_provider(tmp_path: Path) -> None:
+    manager = plugin_manager()
+    factory = CrawlerFactory(
+        cast(HttpClient, _FakeHttp()),
+        data_dir=tmp_path,
+        plugin_manager=manager,
+        plugin_configs={"acme.fake": PluginConfig(config={"endpoint": "https://configured.test"})},
+    )
+
+    first = await factory.get("acme.fake")
+    second = await factory.get("acme.fake")
+    assert first is second
+    assert first is not None
+    result = await first.fetch(SearchQuery("TEST-001"))
+    assert result is not None
+    assert result.title == "Plugin result"
+
+    crawlers = await factory.get_crawlers(["acme.fake"])
+    assert crawlers["acme.fake"] is first
+
+
+@pytest.mark.asyncio
+async def test_disabled_plugin_is_not_available(tmp_path: Path) -> None:
+    factory = CrawlerFactory(
+        cast(HttpClient, _FakeHttp()),
+        data_dir=tmp_path,
+        plugin_manager=plugin_manager(),
+        plugin_configs={"acme.fake": PluginConfig(enabled=False)},
+    )
+    assert await factory.get("acme.fake") is None
+
+
+def playback_plugin_source(plugin_id: str, *, capabilities: str | None = "playback") -> str:
+    if capabilities is None:
+        caps_arg = ""
+    elif capabilities == "both":
+        caps_arg = "capabilities=frozenset({SourceCapability.FILM_METADATA, SourceCapability.PLAYBACK}),"
+    else:
+        caps_arg = "capabilities=frozenset({SourceCapability.PLAYBACK}),"
+    return f"""
+import asyncio
+from pathlib import Path
+
+from pydantic import BaseModel, ConfigDict, Field
+
+from amane.plugin import (
+    FailureReason,
+    FilePlaybackTarget,
+    HlsPlaybackTarget,
+    PlaybackOffer,
+    PlaybackPlugin,
+    PlaybackProvider,
+    PlaybackQuery,
+    PluginContext,
+    RelativeHlsLocator,
+    SourceCapability,
+    SourceDescriptor,
+    SourceError,
+    UpstreamPlaybackTarget,
+)
+
+
+class _Config(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    behavior: str = "upstream"
+    url: str = "http://127.0.0.1:9/"
+    headers: dict[str, str] = Field(default_factory=dict)
+    playlist: str | None = None
+    file_path: str | None = None
+
+
+KEY_FILE = "selected-key.txt"
+KNOWN_KEYS = frozenset({"first", "second"})
+
+
+class _Provider(PlaybackProvider):
+    def __init__(self, config: _Config, data_dir: Path) -> None:
+        self._config = config
+        self._data_dir = data_dir
+
+    def _record_key(self, query: PlaybackQuery) -> None:
+        # 把宿主送来的选中项落到插件自己的运行数据目录, 供集成断言使用.
+        (self._data_dir / KEY_FILE).write_text(query.selected_key or "-", encoding="utf-8")
+
+    async def probe(self, query: PlaybackQuery) -> tuple[PlaybackOffer, ...]:
+        if self._config.behavior == "none":
+            return ()
+        if self._config.behavior == "slow":
+            await asyncio.sleep(3600)
+        if self._config.behavior == "denied":
+            raise SourceError(FailureReason.NO_USABLE_METADATA, detail="该条目索引的文件不存在: gone.mp4")
+        if self._config.behavior == "error":
+            raise SourceError(FailureReason.NETWORK, detail="播放来源失败")
+        if self._config.behavior == "timeout":
+            raise SourceError(FailureReason.TIMEOUT, detail="播放来源探测超时")
+        if self._config.behavior in {"hls", "hls-offer"}:
+            return (
+                PlaybackOffer(
+                    key="main",
+                    name="Remote",
+                    content_type="application/vnd.apple.mpegurl",
+                    seekable=False,
+                ),
+            )
+        if self._config.behavior == "multi":
+            return (
+                PlaybackOffer(key="first", name="First", content_type="video/mp4"),
+                PlaybackOffer(key="second", name="Second", content_type="video/mp4"),
+                PlaybackOffer(
+                    key="broken",
+                    name="Broken",
+                    content_type="video/mp4",
+                    unavailable="该条目索引的文件为空: broken.mp4",
+                ),
+                # 重复 key 是插件侧缺陷: 宿主丢弃后一条并记日志.
+                PlaybackOffer(key="second", name="Duplicate", content_type="video/mp4"),
+            )
+        return (PlaybackOffer(key="main", name="Remote", content_type="video/mp4", seekable=True),)
+
+    async def resolve(self, query: PlaybackQuery):
+        if self._config.behavior == "multi":
+            # 按选中项定位: 认不出来的 key 一律拒绝, 不允许静默换成另一条流.
+            self._record_key(query)
+            if query.selected_key is not None and query.selected_key not in KNOWN_KEYS:
+                raise SourceError(FailureReason.NO_USABLE_METADATA, detail="所选文件不在该条目的索引中")
+            return UpstreamPlaybackTarget(url=self._config.url, content_type="video/mp4")
+        if self._config.behavior == "none":
+            return None
+        if self._config.behavior == "denied":
+            raise SourceError(FailureReason.NO_USABLE_METADATA, detail="该条目索引的文件不存在: gone.mp4")
+        if self._config.behavior == "error":
+            raise SourceError(FailureReason.NETWORK, detail="播放来源失败")
+        if self._config.behavior == "hls":
+            return HlsPlaybackTarget(
+                locator=RelativeHlsLocator(
+                    self._config.url,
+                    headers=self._config.headers,
+                    playlist_text=self._config.playlist,
+                )
+            )
+        if self._config.behavior == "file":
+            path = self._config.file_path or (query.files[0].path if query.files else None)
+            if path is None:
+                return None
+            return FilePlaybackTarget(path=path, content_type="video/mp4")
+        return UpstreamPlaybackTarget(
+            url=self._config.url,
+            headers=self._config.headers,
+            content_type="video/mp4",
+        )
+
+    async def subtitle(self, query: PlaybackQuery, track_id: str):
+        if track_id == "vtt":
+            return "WEBVTT\\n\\n00:00:00.000 --> 00:00:01.000\\nHi\\n"
+        if track_id == "remote":
+            return UpstreamPlaybackTarget(
+                url=self._config.url,
+                headers=self._config.headers,
+                content_type="text/vtt",
+            )
+        return None
+
+
+class Plugin(PlaybackPlugin):
+    config_model = _Config
+
+    @classmethod
+    def descriptor(cls) -> SourceDescriptor:
+        return SourceDescriptor(
+            id={plugin_id!r},
+            name="Fake playback",
+            version="0.1.0",
+            {caps_arg}
+            urls=("https://play.example.test",),
+        )
+
+    def build_playback(self, context: PluginContext, config: BaseModel) -> PlaybackProvider:
+        assert isinstance(config, _Config)
+        return _Provider(config, context.data_dir)
+"""
+
+
+class FakePlaybackPlugin(PlaybackPlugin):
+    @classmethod
+    def descriptor(cls) -> SourceDescriptor:
+        return SourceDescriptor(
+            id="acme.play",
+            name="Fake playback",
+            version="0.1.0",
+            capabilities=frozenset({SourceCapability.PLAYBACK}),
+            urls=("https://play.example.test",),
+        )
+
+    def build_playback(self, context: PluginContext, config: BaseModel) -> PlaybackProvider:
+        raise NotImplementedError
+
+
+def test_discover_accepts_playback_only_plugin(tmp_path: Path) -> None:
+    write_plugin(tmp_path, "acme.play", body=playback_plugin_source("acme.play"))
+    write_plugin(tmp_path, "acme.default", body=playback_plugin_source("acme.default", capabilities=None))
+
+    manager = PluginManager.discover(tmp_path)
+    assert manager.has_plugin("acme.play")
+    assert manager.has_playback_plugin("acme.play")
+    assert not manager.has_film_plugin("acme.play")
+    names = {failure.name for failure in manager.failures}
+    assert "acme.default" in names
+    assert any("film_metadata" in failure.error or "PlaybackPlugin" in failure.error for failure in manager.failures)
+
+
+def test_playback_plugin_cannot_enter_content_routes() -> None:
+    manager = PluginManager({"acme.play": FakePlaybackPlugin()}, [])
+    hot = HotSettings.model_validate({"scraping": {"content_routes": {"censored": ["acme.play"]}}})
+    with pytest.raises(ValueError, match="cannot provide film metadata"):
+        manager.validate_hot_settings(hot)
+
+
+def test_playback_plugin_not_in_route_schema() -> None:
+    manager = PluginManager({"acme.play": FakePlaybackPlugin()}, [])
+    schema = manager.augment_config_schema(HotSettings.model_json_schema())
+    defs = schema.get("$defs")
+    assert isinstance(defs, dict)
+    scraping = defs.get("ScrapingConfig")
+    assert isinstance(scraping, dict)
+    properties = scraping.get("properties")
+    assert isinstance(properties, dict)
+    content_routes = properties.get("content_routes")
+    assert isinstance(content_routes, dict)
+    additional = content_routes.get("additionalProperties")
+    assert isinstance(additional, dict)
+    items = additional.get("items")
+    assert isinstance(items, dict)
+    enum = items.get("enum")
+    assert isinstance(enum, list)
+    assert "acme.play" not in enum
+
+
+@pytest.mark.asyncio
+async def test_crawler_factory_skips_playback_only_plugin(tmp_path: Path) -> None:
+    manager = PluginManager({"acme.play": FakePlaybackPlugin()}, [])
+    factory = CrawlerFactory(
+        cast(HttpClient, _FakeHttp()),
+        data_dir=tmp_path,
+        plugin_manager=manager,
+        plugin_configs={"acme.play": PluginConfig()},
+    )
+    assert await factory.get("acme.play") is None

@@ -1,0 +1,324 @@
+"""/libraries 端点测试"""
+
+import sqlite3
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+import pytest
+
+from amane.db.models import TaskType
+from amane.organize import VIDEO_TEMPLATE_DEFAULT
+
+if TYPE_CHECKING:
+    from httpx2 import AsyncClient
+
+    from amane.db.repository import Repository
+
+
+def _set_library_path(db_path: Path, library_id: int, path: str) -> None:
+    """把库行的路径改成给定写法: 写入侧只落真实路径, 未解析的写法没有别的入口能造出来."""
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("UPDATE libraries SET path = ? WHERE id = ?", (path, library_id))
+
+
+class TestLibraries:
+    @pytest.mark.asyncio(loop_scope="function")
+    async def test_crud_and_defaults(self, client: AsyncClient, repo: Repository, safe_path: Path):
+        empty = await client.get("libraries")
+        assert empty.status_code == 200
+        assert empty.json()["items"] == []
+
+        target = safe_path / "incoming"
+        target.mkdir()
+        created = await client.post(
+            "libraries", json={"path": str(target), "patterns": ["*.mp4", "*.mkv"], "scan": False}
+        )
+        assert created.status_code == 201
+        body = created.json()
+        assert body["path"] == str(target)
+        assert body["automation"] == "scrape"
+        assert body["ingest"] == "native"
+        assert body["cloud_path"] is None
+        assert body["name"] == "incoming"
+        assert body["move_mode"] == "move"
+        assert body["link_template"] is None
+        assert body["link_mode"] == "strm"
+        assert body["strm_content_template"] is None
+        assert body["write_nfo"] is True
+        assert set(body["copy_resources"]) == {"thumb", "poster", "extrafanart", "trailer"}
+        assert body["trailer_pattern"] == "(?i)trailer"
+        assert body["blacklist_patterns"] == []
+        assert body["min_file_size"] == 0
+        assert body["subtitle_extensions"] == [".srt", ".ass", ".ssa", ".vtt", ".sub"]
+        assert body["video_template"] == VIDEO_TEMPLATE_DEFAULT
+        assert body["thumb_template"] is None
+        assert body["poster_template"] is None
+        lib_id = body["id"]
+
+        listed = await client.get("libraries")
+        assert len(listed.json()["items"]) == 1
+        one = await client.get(f"libraries/{lib_id}")
+        assert one.status_code == 200
+        assert one.json()["name"] == "incoming"
+        assert (await client.get("libraries/9999")).status_code == 404
+
+        full_dir = safe_path / "full"
+        full_dir.mkdir()
+        full = await client.post(
+            "libraries",
+            json={
+                "name": "Full Library",
+                "path": str(full_dir),
+                "automation": "none",
+                "recursive": False,
+                "patterns": ["*.mp4"],
+                "move_mode": "hardlink",
+                "video_template": "/out/{number}/{number}.mp4",
+                "poster_template": "/out/{number}/poster.jpg",
+                "thumb_template": "/out/{number}/thumb.jpg",
+                "fanart_template": "/out/{number}/fanart.jpg",
+                "blacklist_patterns": ["广告", "(?i)ads[0-9]+"],
+                "min_file_size": 10485760,
+                "scan": False,
+            },
+        )
+        assert full.status_code == 201
+        fbody = full.json()
+        assert fbody["name"] == "Full Library"
+        assert fbody["move_mode"] == "hardlink"
+        assert fbody["video_template"] == "/out/{number}/{number}.mp4"
+        assert fbody["blacklist_patterns"] == ["广告", "(?i)ads[0-9]+"]
+        assert fbody["min_file_size"] == 10485760
+
+        patched = await client.patch(
+            f"libraries/{lib_id}",
+            json={
+                "move_mode": "symlink",
+                "write_nfo": False,
+                "copy_resources": ["thumb"],
+                "trailer_pattern": "预告",
+                "blacklist_patterns": ["广告", "预览"],
+                "min_file_size": 0,
+                "subtitle_extensions": ["vtt"],
+                "link_template": str(safe_path / "emby" / "{number}" / "{number}.{ext}"),
+                "link_mode": "symlink",
+                "strm_content_template": "/{video_relpath}",
+            },
+        )
+        assert patched.status_code == 200
+        pbody = patched.json()
+        assert pbody["move_mode"] == "symlink"
+        assert pbody["write_nfo"] is False
+        assert pbody["copy_resources"] == ["thumb"]
+        assert pbody["trailer_pattern"] == "预告"
+        assert pbody["blacklist_patterns"] == ["广告", "预览"]
+        assert pbody["min_file_size"] == 0
+        assert pbody["subtitle_extensions"] == [".vtt"]
+        assert pbody["link_mode"] == "symlink"
+        assert pbody["link_template"] == str(safe_path / "emby" / "{number}" / "{number}.{ext}")
+        assert pbody["strm_content_template"] == "/{video_relpath}"
+
+        cleared_strm = await client.patch(f"libraries/{lib_id}", json={"strm_content_template": "  "})
+        assert cleared_strm.status_code == 200
+        assert cleared_strm.json()["strm_content_template"] is None
+
+        cleared = await client.patch(f"libraries/{lib_id}", json={"patterns": []})
+        assert cleared.status_code == 200
+        assert cleared.json()["patterns"] == []
+
+        empty_patch = await client.patch(f"libraries/{lib_id}", json={})
+        assert empty_patch.status_code == 422
+        assert (await client.patch(f"libraries/{lib_id}", json={"patterns": None})).status_code == 422
+        assert (await client.patch("libraries/9999", json={"automation": "none"})).status_code == 404
+
+        await repo.create_media_file(library_id=lib_id, path=str(target / "a.mp4"))
+        await repo.create_media_file(library_id=lib_id, path=str(target / "b.mp4"))
+        deleted = await client.delete(f"libraries/{lib_id}")
+        assert deleted.status_code == 204
+        assert await repo.count_media_files(library_id=lib_id) == 0
+        assert await repo.get_library(lib_id) is None
+        assert (await client.delete("libraries/9999")).status_code == 404
+
+    @pytest.mark.asyncio(loop_scope="function")
+    async def test_create_rejects_illegal_payloads(self, client: AsyncClient, safe_path: Path):
+        missing = await client.post("libraries", json={"path": str(safe_path / "does-not-exist")})
+        assert missing.status_code == 404
+        outside = await client.post("libraries", json={"path": "/etc"})
+        assert outside.status_code == 403
+        as_file = safe_path / "a-file.txt"
+        as_file.write_text("hello")
+        assert (await client.post("libraries", json={"path": str(as_file)})).status_code == 400
+
+        target = safe_path / "bad"
+        target.mkdir()
+        base = {"path": str(target), "scan": False}
+        assert (await client.post("libraries", json={**base, "move_mode": "foobar"})).status_code == 422
+        assert (await client.post("libraries", json={**base, "link_mode": "foobar"})).status_code == 422
+        assert (await client.post("libraries", json={**base, "trailer_pattern": "[unclosed"})).status_code == 422
+        assert (
+            await client.post("libraries", json={**base, "blacklist_patterns": ["广告", "(ads"]})
+        ).status_code == 422
+        assert (await client.post("libraries", json={**base, "min_file_size": -1})).status_code == 422
+        assert (
+            await client.post("libraries", json={**base, "subtitle_extensions": [".srt", "bad ext"]})
+        ).status_code == 422
+        assert (
+            await client.post("libraries", json={**base, "video_template": "{number}[-CD{cd?}.{ext}"})
+        ).status_code == 422
+        assert (await client.post("libraries", json={**base, "video_template": "{number}].{ext}"})).status_code == 422
+        assert (
+            await client.post("libraries", json={**base, "video_template": "{mosaic?|uncencored=U}"})
+        ).status_code == 422
+        assert (
+            await client.post("libraries", json={**base, "strm_content_template": "/{video_relpath}\n"})
+        ).status_code == 422
+
+        ok_empty_trailer = await client.post("libraries", json={**base, "trailer_pattern": ""})
+        assert ok_empty_trailer.status_code == 201
+        assert ok_empty_trailer.json()["trailer_pattern"] == ""
+
+        sub_dir = target / "sub-norm"
+        sub_dir.mkdir()
+        norm = await client.post(
+            "libraries", json={"path": str(sub_dir), "subtitle_extensions": ["SRT", ".ass", "srt"], "scan": False}
+        )
+        assert norm.status_code == 201
+        assert norm.json()["subtitle_extensions"] == [".srt", ".ass"]
+
+        off_dir = target / "sub-off"
+        off_dir.mkdir()
+        off = await client.post("libraries", json={"path": str(off_dir), "subtitle_extensions": [], "scan": False})
+        assert off.status_code == 201
+        assert off.json()["subtitle_extensions"] == []
+
+    @pytest.mark.asyncio(loop_scope="function")
+    async def test_allow_all_creates_library_outside_files_dir(self, allow_all_client: AsyncClient, tmp_path: Path):
+        target = tmp_path / "nas-share"
+        target.mkdir()
+        resp = await allow_all_client.post("libraries", json={"path": str(target), "scan": False})
+        assert resp.status_code == 201, resp.text
+        assert Path(resp.json()["path"]).resolve() == target.resolve()
+
+    @pytest.mark.asyncio(loop_scope="function")
+    async def test_update_path_and_invalid_fields(self, client: AsyncClient, repo: Repository, safe_path: Path):
+        lib = await repo.create_library(name="t", path=str(safe_path))
+        assert (await client.patch(f"libraries/{lib.id}", json={"path": str(safe_path / "missing")})).status_code == 404
+
+        dangling = await repo.create_library(name="d", path="/nonexistent")
+        skipped = await client.patch(f"libraries/{dangling.id}", json={"automation": "none"})
+        assert skipped.status_code == 200
+        assert skipped.json()["automation"] == "none"
+
+        assert (await client.patch(f"libraries/{lib.id}", json={"blacklist_patterns": ["(ads"]})).status_code == 422
+        assert (await client.patch(f"libraries/{lib.id}", json={"min_file_size": -1})).status_code == 422
+        assert (
+            await client.patch(f"libraries/{lib.id}", json={"video_template": "{number}[-CD{cd?}"})
+        ).status_code == 422
+        assert (await client.patch(f"libraries/{lib.id}", json={"trailer_pattern": "[unclosed"})).status_code == 422
+
+    @pytest.mark.asyncio(loop_scope="function")
+    async def test_create_scan_flag(self, client: AsyncClient, repo: Repository, safe_path: Path):
+        scanned = safe_path / "auto-scan"
+        scanned.mkdir()
+        resp = await client.post("libraries", json={"path": str(scanned), "scan": True})
+        assert resp.status_code == 201
+        lib_id = resp.json()["id"]
+        tasks = await repo.list_tasks(task_types=[TaskType.REFRESH])
+        scan_tasks = [t for t in tasks if t.payload.get("library_id") == lib_id]
+        assert len(scan_tasks) == 1
+        assert scan_tasks[0].payload["scan"] == ["add"]
+        assert scan_tasks[0].payload["scrape"] == []
+        assert scan_tasks[0].payload["path"] == str(scanned)
+
+        quiet = safe_path / "no-scan"
+        quiet.mkdir()
+        quiet_resp = await client.post("libraries", json={"path": str(quiet), "scan": False})
+        assert quiet_resp.status_code == 201
+        quiet_id = quiet_resp.json()["id"]
+        still = [
+            t for t in await repo.list_tasks(task_types=[TaskType.REFRESH]) if t.payload.get("library_id") == quiet_id
+        ]
+        assert still == []
+
+    @pytest.mark.asyncio(loop_scope="function")
+    async def test_library_path_is_resolved(self, client: AsyncClient, safe_path: Path):
+        """库路径解析为真实路径: 符号链接别名与真实路径只能留一种写法, 否则索引与清理清单都按字面路径分家."""
+        real = safe_path / "real-movies"
+        real.mkdir()
+        alias = safe_path / "alias-movies"
+        alias.symlink_to(real, target_is_directory=True)
+
+        created = await client.post("libraries", json={"path": str(alias), "scan": False})
+
+        assert created.status_code == 201
+        library_id = created.json()["id"]
+        assert created.json()["path"] == str(real)
+
+        updated = await client.patch(f"libraries/{library_id}", json={"path": str(alias)})
+
+        assert updated.status_code == 200
+        assert updated.json()["path"] == str(real)
+
+    @pytest.mark.asyncio(loop_scope="function")
+    async def test_unchanged_library_path_keeps_its_form(self, client: AsyncClient, safe_path: Path, tmp_path: Path):
+        """值没变就不改写路径形式.
+
+        库路径与索引行必须同一写法, 而解析只发生在路径真的被改动时: 未解析的库根一经改写,
+        既有索引行会全部落到库根之外, 下次扫描就会把同一个文件再登记一遍.
+        """
+        kept_real = safe_path / "kept-real"
+        kept_real.mkdir()
+        kept_alias = safe_path / "kept-alias"
+        kept_alias.symlink_to(kept_real, target_is_directory=True)
+
+        created = await client.post("libraries", json={"path": str(kept_alias), "scan": False})
+        library_id = created.json()["id"]
+        _set_library_path(tmp_path / "data" / "amane.db", library_id, str(kept_alias))
+
+        unchanged = await client.patch(f"libraries/{library_id}", json={"path": str(kept_alias)})
+
+        assert unchanged.status_code == 200
+        assert unchanged.json()["path"] == str(kept_alias)
+
+        moved_real = safe_path / "moved-real"
+        moved_real.mkdir()
+        moved_alias = safe_path / "moved-alias"
+        moved_alias.symlink_to(moved_real, target_is_directory=True)
+
+        changed = await client.patch(f"libraries/{library_id}", json={"path": str(moved_alias)})
+
+        assert changed.status_code == 200
+        assert changed.json()["path"] == str(moved_real)
+
+
+class TestAutoOrganize:
+    @pytest.mark.asyncio(loop_scope="function")
+    async def test_default_off_and_patch_persists(self, client: AsyncClient, repo: Repository, safe_path: Path) -> None:
+        """默认关闭; PATCH 后必须从库里读回 (响应字段与 repo 的显式赋值是两处)."""
+        target = safe_path / "auto"
+        target.mkdir()
+        created = await client.post("libraries", json={"path": str(target), "scan": False})
+
+        assert created.status_code == 201
+        assert created.json()["auto_organize"] is False
+        library_id = created.json()["id"]
+
+        patched = await client.patch(f"libraries/{library_id}", json={"auto_organize": True})
+
+        assert patched.status_code == 200
+        assert patched.json()["auto_organize"] is True
+        stored = await repo.get_library(library_id)
+        assert stored is not None
+        assert stored.auto_organize is True
+
+    @pytest.mark.asyncio(loop_scope="function")
+    async def test_create_with_flag(self, client: AsyncClient, repo: Repository, safe_path: Path) -> None:
+        target = safe_path / "auto-create"
+        target.mkdir()
+        created = await client.post("libraries", json={"path": str(target), "auto_organize": True, "scan": False})
+
+        assert created.status_code == 201
+        assert created.json()["auto_organize"] is True
+        stored = await repo.get_library(created.json()["id"])
+        assert stored is not None
+        assert stored.auto_organize is True

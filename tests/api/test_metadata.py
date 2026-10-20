@@ -1,0 +1,301 @@
+"""/metadata HTTP 接线: 状态码、JSON 形状、422. 列表筛选/级联删除见 tests/db; 合并规则见 tests/aggregate."""
+
+from typing import TYPE_CHECKING
+
+import pytest
+import pytest_asyncio
+from PIL import Image
+
+from amane.db.models import MediaFileStatus, Metadata
+from amane.enums import ActorGender
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from fastapi import FastAPI
+    from httpx2 import AsyncClient
+
+    from amane.db.repository import Repository
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def _seed_library(repo: Repository) -> None:
+    """FK 约束要求归属库存在; 这些测试以 library_id=1 创建 MediaFile."""
+    if await repo.get_library(1) is None:
+        await repo.create_library(name="default", path="/")
+
+
+class TestMetadataHttp:
+    @pytest.mark.asyncio(loop_scope="function")
+    async def test_list_phase_comes_from_number_without_files(self, client: AsyncClient, repo: Repository):
+        """有码 / 无码取番号类别: 没有挂载文件也亮, 无码再并上文件的无码标记."""
+        uncensored = await repo.upsert_metadata(number="HEYZO-1234")
+        marked = await repo.upsert_metadata(number="MIDV-002")
+        assert uncensored.id is not None and marked.id is not None
+        media = await repo.create_media_file(library_id=1, path="/video/MIDV-002-无码.mp4")
+        assert media.id is not None
+        await repo.update_media_file(media.id, metadata_id=marked.id)
+
+        listed = await client.get("metadata?sort_by=number&order=asc")
+        items = {item["number"]: item for item in listed.json()["items"]}
+        assert items["HEYZO-1234"]["file_count"] == 0
+        assert items["HEYZO-1234"]["file_phase"] == {
+            "has_subtitle": False,
+            "censored": False,
+            "uncensored": True,
+            "mosaics": [],
+            "definition": None,
+        }
+        assert items["MIDV-002"]["file_phase"]["censored"] is True
+        assert items["MIDV-002"]["file_phase"]["uncensored"] is True
+        assert items["MIDV-002"]["file_phase"]["mosaics"] == ["uncensored"]
+
+        detail = await client.get(f"metadata/{uncensored.id}")
+        assert detail.json()["metadata"]["file_phase"]["uncensored"] is True
+        assert detail.json()["files"] == []
+
+        uncensored_filtered = await client.get("metadata?uncensored=true")
+        assert {item["number"] for item in uncensored_filtered.json()["items"]} == {"HEYZO-1234", "MIDV-002"}
+        by_type = await client.get("metadata?content_type=uncensored")
+        assert [item["number"] for item in by_type.json()["items"]] == ["HEYZO-1234"]
+        by_mosaic = await client.get("metadata?mosaic=uncensored")
+        assert [item["number"] for item in by_mosaic.json()["items"]] == ["MIDV-002"]
+        assert (await client.get("metadata?mosaic=censored")).status_code == 422
+
+    @pytest.mark.asyncio(loop_scope="function")
+    async def test_list_detail_update_delete(self, client: AsyncClient, repo: Repository):
+        empty = await client.get("metadata")
+        assert empty.status_code == 200
+        assert empty.json()["items"] == []
+        assert empty.json()["total"] == 0
+        assert (await client.get("metadata?definition=bogus")).status_code == 422
+
+        meta = await repo.upsert_metadata(
+            number="ABC-001",
+            title="Test",
+            actors=["Mei", "MaleA"],
+            actor_genders={"Mei": ActorGender.FEMALE},
+        )
+        assert meta.id is not None
+        media = await repo.create_media_file(library_id=1, path="/video/MIDV-001-C.mp4", number="ABC-001")
+        assert media.id is not None
+        await repo.update_media_file(media.id, status=MediaFileStatus.SCRAPED, metadata_id=meta.id)
+
+        listed = await client.get("metadata?search=ABC")
+        assert listed.status_code == 200
+        item = listed.json()["items"][0]
+        assert item["file_count"] == 1
+        assert item["file_phase"]["has_subtitle"] is True
+
+        detail = await client.get(f"metadata/{meta.id}")
+        assert detail.status_code == 200
+        body = detail.json()
+        assert body["metadata"]["title"] == "Test"
+        assert len(body["files"]) == 1
+        assert body["actor_genders"] == {"Mei": "female", "MaleA": "unknown"}
+        assert set(body["actor_ids"]) == {"Mei", "MaleA"}
+        assert (await client.get("metadata/9999")).status_code == 404
+
+        ok = await client.patch(f"metadata/{meta.id}", json={"release": "2020-01-15T00:00:00Z"})
+        assert ok.status_code == 200
+        assert ok.json()["release"] == "2020-01-15"
+        assert (await client.patch(f"metadata/{meta.id}", json={"release": "not-a-date"})).status_code == 422
+
+        urls = await client.patch(
+            f"metadata/{meta.id}",
+            json={
+                "poster_urls": ["https://a/p.jpg", "https://b/p.jpg"],
+                "scores": {"javdb": 4.5},
+                "external_ids": {"javdb": "abc"},
+            },
+        )
+        assert urls.status_code == 200
+        data = urls.json()
+        assert data["poster_urls"] == ["https://a/p.jpg", "https://b/p.jpg"]
+        assert data["poster_url"] == "https://a/p.jpg"
+        assert data["score"] == 4.5
+        assert (await client.patch("metadata/9999", json={"title": "X"})).status_code == 404
+        assert (await client.patch(f"metadata/{meta.id}", json={})).status_code == 422
+        extra = await client.patch(f"metadata/{meta.id}", json={"title": "New", "unknown_field": "ignored"})
+        assert extra.status_code == 200
+        assert extra.json()["title"] == "New"
+        for bad_payload in ({"runtime": "not_an_int"}, {"actors": "not_a_list"}):
+            assert (await client.patch(f"metadata/{meta.id}", json=bad_payload)).status_code == 422
+
+        deleted = await client.delete(f"metadata/{meta.id}")
+        assert deleted.status_code == 204
+        assert (await client.delete("metadata/9999")).status_code == 404
+
+    @pytest.mark.asyncio(loop_scope="function")
+    async def test_detail_file_rows_carry_derived_phase(self, client: AsyncClient, repo: Repository):
+        """详情里的文件行与条目相位同源: 有码条目的文件行带 censored, 带无码标记的再带 uncensored."""
+        meta = await repo.upsert_metadata(number="MIDV-123")
+        assert meta.id is not None
+        plain = await repo.create_media_file(library_id=1, path="/video/MIDV-123.mp4", metadata_id=meta.id)
+        marked = await repo.create_media_file(library_id=1, path="/video/MIDV-124-无码.mp4", metadata_id=meta.id)
+        assert plain.id is not None and marked.id is not None
+
+        detail = await client.get(f"metadata/{meta.id}")
+        rows = {row["id"]: row for row in detail.json()["files"]}
+        assert (rows[plain.id]["censored"], rows[plain.id]["uncensored"]) == (True, False)
+        assert (rows[marked.id]["censored"], rows[marked.id]["uncensored"]) == (False, True)
+
+    @pytest.mark.asyncio(loop_scope="function")
+    async def test_list_sort_by_score(self, client: AsyncClient, repo: Repository):
+        """HTTP 接线: 接受 score 排序, 响应 score 是 scores 首值而非最大值; 未知排序字段 422."""
+        await repo.upsert_metadata(number="S-1", title="One", scores={"a": 1.0, "b": 4.5})
+
+        listed = await client.get("metadata?sort_by=score&order=desc")
+        assert listed.status_code == 200
+        assert [i["score"] for i in listed.json()["items"]] == [1.0]
+        assert (await client.get("metadata?sort_by=bogus")).status_code == 422
+
+    @pytest.mark.asyncio(loop_scope="function")
+    async def test_list_vr_filter_and_field(self, client: AsyncClient, repo: Repository):
+        """HTTP 接线: vr 三态筛选与响应字段同源; 非法取值 422, 且不成为可写字段."""
+        await repo.upsert_metadata(number="VR-001", tags=["VR"])
+        await repo.upsert_metadata(number="MIDV-123", tags=["単体作品"])
+
+        listed = await client.get("metadata?vr=true&sort_by=number&order=asc")
+        assert listed.status_code == 200
+        assert [(i["number"], i["vr"]) for i in listed.json()["items"]] == [("VR-001", True)]
+        only_2d = await client.get("metadata?vr=false&sort_by=number&order=asc")
+        assert [(i["number"], i["vr"]) for i in only_2d.json()["items"]] == [("MIDV-123", False)]
+        both = await client.get("metadata?sort_by=number&order=asc")
+        assert [i["vr"] for i in both.json()["items"]] == [False, True]
+
+        assert (await client.get("metadata?vr=bogus")).status_code == 422
+        assert "vr" not in (await client.get("metadata/schema")).json()["properties"]
+
+    @pytest.mark.asyncio(loop_scope="function")
+    async def test_schema_includes_editable_fields(self, client: AsyncClient):
+        resp = await client.get("metadata/schema")
+        assert resp.status_code == 200
+        props = resp.json()["properties"]
+        for key in ("title", "actors", "poster_urls", "scores", "external_ids", "source_urls"):
+            assert key in props
+        # 锁列由 PUT /locks 管理, 不经 PATCH 写入.
+        assert "locked_fields" not in props
+
+    @pytest.mark.asyncio(loop_scope="function")
+    async def test_merge_http(self, client: AsyncClient, repo: Repository):
+        meta = await repo.upsert_metadata(
+            number="ABC-001",
+            title="javdb title",
+            field_sources={"title": "javdb"},
+            raw={"javdb": {"title": "javdb title"}, "dmm": {"title": "dmm title"}},
+        )
+        assert meta.id is not None
+        resp = await client.post(f"metadata/{meta.id}/merge", json={"selections": {"title": "dmm"}})
+        assert resp.status_code == 200
+        assert resp.json()["title"] == "dmm title"
+        assert resp.json()["field_sources"]["title"] == "dmm"
+        assert resp.json()["locked_fields"] == ["title"]
+
+        none_meta = await repo.upsert_metadata(
+            number="ABC-004", field_sources={"title": "javdb"}, raw={"javdb": {"title": None}}
+        )
+        assert none_meta.id is not None
+        assert (
+            await client.post(f"metadata/{none_meta.id}/merge", json={"selections": {"title": "javdb"}})
+        ).status_code == 400
+        assert (await client.post(f"metadata/{meta.id}/merge", json={"selections": {}})).status_code == 400
+        assert (await client.post("metadata/9999/merge", json={"selections": {"title": "javdb"}})).status_code == 404
+        bad = await client.post(f"metadata/{meta.id}/merge", json={"selections": {"title": "nonexistent"}})
+        assert bad.status_code == 422
+        assert "nonexistent" in bad.json()["detail"]
+
+    @pytest.mark.asyncio(loop_scope="function")
+    async def test_crop_poster_http(self, client: AsyncClient, repo: Repository, app: FastAPI):
+        meta = await repo.upsert_metadata(
+            number="CROP-001", thumb_urls=["https://example.com/t.jpg"], poster_urls=["https://example.com/old-p.jpg"]
+        )
+        assert meta.id is not None
+
+        async def fake_download(url: str, dest: Path, **kwargs: object) -> bool:
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            Image.new("RGB", (800, 538), "blue").save(dest)
+            return True
+
+        app.state.runtime.web_client.download = fake_download  # type: ignore[method-assign]
+
+        resp = await client.post(
+            f"metadata/{meta.id}/crop-poster", json={"left": 421, "top": 0, "right": 800, "bottom": 538}
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data["poster_urls"]) == 1
+        assert data["poster_urls"][0].startswith("/api/resources/")
+        assert data["thumb_urls"] == ["https://example.com/t.jpg"]
+        # 裁切写入 poster_urls 并自动锁定.
+        assert data["locked_fields"] == ["poster_urls"]
+
+        no_thumb = await repo.upsert_metadata(number="CROP-003", poster_urls=["https://example.com/p.jpg"])
+        assert no_thumb.id is not None
+        missing_thumb = await client.post(
+            f"metadata/{no_thumb.id}/crop-poster", json={"left": 0, "top": 0, "right": 10, "bottom": 10}
+        )
+        assert missing_thumb.status_code == 400
+        assert "封面" in missing_thumb.json()["detail"]
+
+        inverted = await client.post(
+            f"metadata/{meta.id}/crop-poster", json={"left": 100, "top": 0, "right": 50, "bottom": 100}
+        )
+        assert inverted.status_code == 422
+        assert (
+            await client.post("metadata/99999/crop-poster", json={"left": 0, "top": 0, "right": 10, "bottom": 10})
+        ).status_code == 404
+
+    @pytest.mark.asyncio(loop_scope="function")
+    async def test_locks_http(self, client: AsyncClient, repo: Repository):
+        meta = await repo.upsert_metadata(number="LOCK-101", title="X")
+        assert meta.id is not None
+
+        locked = await client.put(f"metadata/{meta.id}/locks", json={"fields": ["title", "poster_urls"]})
+        assert locked.status_code == 200
+        assert set(locked.json()["locked_fields"]) == {"title", "poster_urls"}
+
+        # 重复值按集合去重, 顺序稳定.
+        dup = await client.put(f"metadata/{meta.id}/locks", json={"fields": ["poster_urls", "title", "title"]})
+        assert dup.status_code == 200
+        assert dup.json()["locked_fields"] == ["title", "poster_urls"]
+
+        # 手动 PATCH 无视锁, 并把写入字段并入锁.
+        patched = await client.patch(f"metadata/{meta.id}", json={"title": "Manual"})
+        assert patched.status_code == 200
+        assert patched.json()["title"] == "Manual"
+        assert set(patched.json()["locked_fields"]) == {"title", "poster_urls"}
+
+        # 自动刮削写入跳过锁定字段, 未锁定字段正常更新.
+        updated = await repo.upsert_metadata(number="LOCK-101", title="Scraped", actors=["A"])
+        assert updated.title == "Manual"
+        body = (await client.get(f"metadata/{meta.id}")).json()["metadata"]
+        assert body["actors"] == ["A"]
+
+        cleared = await client.put(f"metadata/{meta.id}/locks", json={"fields": []})
+        assert cleared.status_code == 200
+        assert cleared.json()["locked_fields"] == []
+
+        bad = await client.put(f"metadata/{meta.id}/locks", json={"fields": ["bogus"]})
+        assert bad.status_code == 422
+        assert (await client.put("metadata/9999/locks", json={"fields": []})).status_code == 404
+
+    @pytest.mark.asyncio(loop_scope="function")
+    async def test_response_drops_unknown_locked_values(self, client: AsyncClient, repo: Repository):
+        """库内非法存量锁值不使读路径 500, 并去重."""
+        meta = await repo.upsert_metadata(number="LOCK-102")
+        assert meta.id is not None
+        async with repo._session() as session:
+            row = await session.get(Metadata, meta.id)
+            assert row is not None
+            row.locked_fields = ["title", "title", "bogus"]
+            session.add(row)
+            await session.commit()
+
+        detail = await client.get(f"metadata/{meta.id}")
+        assert detail.status_code == 200
+        assert detail.json()["metadata"]["locked_fields"] == ["title"]
+
+        listed = await client.get("metadata?search=LOCK-102")
+        assert listed.status_code == 200
+        assert listed.json()["items"][0]["locked_fields"] == ["title"]

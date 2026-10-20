@@ -1,0 +1,643 @@
+from collections.abc import Collection, Sequence
+from datetime import datetime
+from typing import Unpack, cast
+
+from sqlalchemy import asc
+from sqlalchemy.exc import IntegrityError
+from sqlmodel import col, select
+from sqlmodel.ext.asyncio.session import AsyncSession
+
+from ...enums import ActorField, ActorGender
+from ...utils.collections import unique_ids
+from ...utils.text import normalize_long_text
+from ..actor_lookup import build_actor_lookup_names, list_actor_aliases, lookup_actors_by_name
+from ..actor_person import (
+    actor_to_aggregated,
+    apply_aggregated_to_actor,
+    filter_locked_person_data,
+    locked_fields_of,
+)
+from ..models import (
+    SCRAPE_FACET_KINDS,
+    Actor,
+    ActorSortField,
+    ActorUserTag,
+    Comment,
+    Director,
+    FacetKind,
+    FacetRule,
+    FacetSortField,
+    Metadata,
+    MetadataUserTag,
+    Publisher,
+    Series,
+    SortOrder,
+    Studio,
+    Tag,
+    UserTag,
+)
+from ..repo_types import (
+    ActorBrowseItem,
+    ActorBrowseParams,
+    ActorPersonFields,
+    CommentUpdates,
+    FacetBatchResult,
+    FacetItem,
+    UserTagLinkAction,
+    UserTagLinkResult,
+    UserTagUpdates,
+    WriteMode,
+    _utcnow,
+)
+from .actor_browse import browse_actors
+from .base import RepositoryMixinBase
+from .facet_helpers import (
+    LINK_FACETS,
+    SCALAR_FACETS,
+    add_one_actor_alias,
+    apply_user_tags_to_actors,
+    apply_user_tags_to_metadata,
+    delete_link_facet,
+    delete_scalar_facet,
+    get_facet,
+    list_facets,
+    merge_link_facets,
+    merge_scalar_facets,
+    normalize_names,
+    purge_user_tag_links,
+    remove_one_actor_alias,
+    rename_link_facet,
+    rename_scalar_facet,
+    replace_actor_aliases,
+    set_facets_favorite,
+)
+
+
+async def _rows_by_names[T: Actor | Director | Tag | Studio | Publisher | Series](
+    session: AsyncSession, model: type[T], names: Sequence[str]
+) -> list[T]:
+    """按 UNIQUE 展示名批量取回; 空名单不发 ``IN ()``."""
+    unique = list(dict.fromkeys(n for n in names if n))
+    if not unique:
+        return []
+    return list((await session.exec(select(model).where(col(model.name).in_(unique)))).all())
+
+
+async def _ensure_user_tags_once(session: AsyncSession, names: Sequence[str]) -> tuple[list[UserTag], int]:
+    """一次尝试: 按名称取回已存在的行, 其余插入; 撞唯一索引由调用方回滚重试."""
+    existing = {
+        row.name: row for row in (await session.exec(select(UserTag).where(col(UserTag.name).in_(names)))).all()
+    }
+    created = 0
+    for name in names:
+        if name in existing:
+            continue
+        tag = UserTag(name=name)
+        session.add(tag)
+        existing[name] = tag
+        created += 1
+    await session.flush()
+    tags = [existing[name] for name in names]
+    await session.commit()
+    return tags, created
+
+
+_ACTOR_FIELD_NAMES = frozenset(str(field) for field in ActorField)
+
+
+def _merge_written_locks(locked: set[ActorField], field_names: Collection[str]) -> list[str]:
+    """MANUAL 写入: 把本次写入的可锁字段并入锁定集, 按枚举声明序输出."""
+    written = {ActorField(name) for name in field_names if name in _ACTOR_FIELD_NAMES}
+    return [str(field) for field in ActorField if field in locked | written]
+
+
+async def _apply_actor_updates(
+    session: AsyncSession, actor: Actor, updates: ActorPersonFields, *, mode: WriteMode
+) -> None:
+    """就地应用人物字段; ``MANUAL`` 时把写入字段并入锁定集. 提交由调用方负责."""
+    if "aliases" in updates:
+        await replace_actor_aliases(session, actor, updates["aliases"])
+    if "gender" in updates:
+        actor.gender = updates["gender"]
+    if "birthday" in updates:
+        actor.birthday = updates["birthday"]
+    if "birthplace" in updates:
+        actor.birthplace = updates["birthplace"]
+    if "height" in updates:
+        actor.height = updates["height"]
+    if "bust" in updates:
+        actor.bust = updates["bust"]
+    if "waist" in updates:
+        actor.waist = updates["waist"]
+    if "hip" in updates:
+        actor.hip = updates["hip"]
+    if "cup" in updates:
+        actor.cup = updates["cup"]
+    if "overview" in updates:
+        actor.overview = normalize_long_text(updates["overview"])
+    if "tagline" in updates:
+        actor.tagline = updates["tagline"]
+    if "image_urls" in updates:
+        actor.image_urls = updates["image_urls"]
+    if "provider_ids" in updates:
+        actor.provider_ids = updates["provider_ids"]
+    if "source_urls" in updates:
+        actor.source_urls = updates["source_urls"]
+    if "field_sources" in updates:
+        actor.field_sources = updates["field_sources"]
+    if "raw" in updates:
+        actor.raw = updates["raw"]
+    if mode is WriteMode.MANUAL:
+        actor.locked_fields = _merge_written_locks(locked_fields_of(actor), updates.keys())
+    actor.updated_at = _utcnow()
+    session.add(actor)
+
+
+async def _clear_person_fields(session: AsyncSession, actor: Actor) -> None:
+    """就地清空人物档案并解除全部锁 (保留 ``name`` / ``gender``); 提交由调用方负责.
+
+    ``field_sources`` 与 ``raw`` 一并清空: 残留来源指向空值, 而旧快照会在下次刮削被原样写回.
+    """
+    await replace_actor_aliases(session, actor, [])
+    actor.birthday = None
+    actor.birthplace = None
+    actor.height = None
+    actor.bust = None
+    actor.waist = None
+    actor.hip = None
+    actor.cup = None
+    actor.overview = None
+    actor.tagline = None
+    actor.image_urls = []
+    actor.provider_ids = {}
+    actor.source_urls = {}
+    actor.field_sources = {}
+    actor.raw = {}
+    actor.locked_fields = []
+    actor.updated_at = _utcnow()
+    session.add(actor)
+
+
+class FacetsRepoMixin(RepositoryMixinBase):
+    async def resolve_metadata_facet_ids(
+        self, meta: Metadata
+    ) -> tuple[
+        dict[str, int],
+        dict[str, ActorGender],
+        dict[str, int],
+        dict[str, int],
+        int | None,
+        int | None,
+        int | None,
+    ]:
+        """名称 → 分类实体 id; 演员额外带已装入行上的 gender. 未投影的名称不出现."""
+        async with self._session() as session:
+            actor_ids: dict[str, int] = {}
+            actor_genders: dict[str, ActorGender] = {}
+            for row in await _rows_by_names(session, Actor, normalize_names(meta.actors)):
+                if row.id is not None:
+                    actor_ids[row.name] = row.id
+                    actor_genders[row.name] = row.gender
+            director_ids = {
+                row.name: row.id
+                for row in await _rows_by_names(session, Director, normalize_names(meta.directors))
+                if row.id is not None
+            }
+            tag_ids = {
+                row.name: row.id
+                for row in await _rows_by_names(session, Tag, normalize_names(meta.tags))
+                if row.id is not None
+            }
+            studio = (await _rows_by_names(session, Studio, [meta.studio] if meta.studio else []))[:1]
+            publisher = (await _rows_by_names(session, Publisher, [meta.publisher] if meta.publisher else []))[:1]
+            series = (await _rows_by_names(session, Series, [meta.series] if meta.series else []))[:1]
+            return (
+                actor_ids,
+                actor_genders,
+                director_ids,
+                tag_ids,
+                studio[0].id if studio else None,
+                publisher[0].id if publisher else None,
+                series[0].id if series else None,
+            )
+
+    async def list_facets(
+        self,
+        kind: FacetKind,
+        search: str | None = None,
+        favorite: bool | None = None,
+        offset: int = 0,
+        limit: int = 50,
+        sort_by: FacetSortField = FacetSortField.NAME,
+        order: SortOrder = SortOrder.ASC,
+    ) -> tuple[list[FacetItem], int]:
+        async with self._session() as session:
+            return await list_facets(
+                session,
+                kind,
+                search=search,
+                favorite=favorite,
+                offset=offset,
+                limit=limit,
+                sort_by=sort_by,
+                order=order,
+            )
+
+    async def set_facets_favorite(
+        self, kind: FacetKind, facet_ids: Sequence[int], is_favorite: bool
+    ) -> FacetBatchResult:
+        """整体赋值一批分类的收藏位, 单个事务; 分类不支持收藏抛 ``ValueError``."""
+        async with self._session() as session:
+            return await set_facets_favorite(session, kind, facet_ids, is_favorite)
+
+    async def get_facet(self, kind: FacetKind, facet_id: int) -> FacetItem | None:
+        async with self._session() as session:
+            return await get_facet(session, kind, facet_id)
+
+    async def get_actor(self, actor_id: int) -> Actor | None:
+        async with self._session() as session:
+            return await session.get(Actor, actor_id)
+
+    async def get_actor_names(self, actor_ids: Sequence[int]) -> dict[int, str]:
+        """不存在的 id 不出现在结果中."""
+        ids = list(dict.fromkeys(int(i) for i in actor_ids if i))
+        if not ids:
+            return {}
+        async with self._session() as session:
+            rows = (await session.exec(select(Actor.id, Actor.name).where(col(Actor.id).in_(ids)))).all()
+            return {int(i): str(n) for i, n in rows if i is not None}
+
+    async def get_actors_by_names(self, names: Sequence[str]) -> list[Actor]:
+        """按展示名批量查; 不存在的名字不出现."""
+        unique = list(dict.fromkeys(n for n in names if n))
+        if not unique:
+            return []
+        async with self._session() as session:
+            stmt = select(Actor).where(col(Actor.name).in_(unique))
+            return list((await session.exec(stmt)).all())
+
+    async def get_actor_lookup_names(self, actor_id: int) -> list[str] | None:
+        """展示名加别名行. Actor 不存在返回 None."""
+        async with self._session() as session:
+            actor = await session.get(Actor, actor_id)
+            if actor is None:
+                return None
+            return await build_actor_lookup_names(session, actor)
+
+    async def list_actors(
+        self,
+        *,
+        offset: int = 0,
+        limit: int = 500,
+        sort_by: ActorSortField | None = None,
+        updated_before: datetime | None = None,
+    ) -> list[Actor]:
+        """默认按 id 升序分页. ``sort_by`` 指定时改用该列; ``updated_before`` 过滤 updated_at."""
+        async with self._session() as session:
+            stmt = select(Actor)
+            if updated_before is not None:
+                stmt = stmt.where(col(Actor.updated_at) < updated_before)
+            if sort_by == ActorSortField.UPDATED_AT:
+                stmt = stmt.order_by(asc(col(Actor.updated_at)), asc(col(Actor.id)))
+            else:
+                stmt = stmt.order_by(asc(col(Actor.id)))
+            return list((await session.exec(stmt.offset(offset).limit(limit))).all())
+
+    async def browse_actors(
+        self, params: ActorBrowseParams, *, id_subquery_sql: str | None = None
+    ) -> tuple[list[ActorBrowseItem], int]:
+        """列表行不含简介/别名/源字典."""
+        async with self._session() as session:
+            return await browse_actors(session, params, id_subquery_sql=id_subquery_sql)
+
+    async def save_actor(self, actor: Actor, *, aliases: Sequence[str] | None = None) -> Actor | None:
+        """不存在返回 None. ``aliases`` 提供时整表替换别名行; 省略或别名已锁则不动别名.
+
+        AUTO 写入 (演员刮削), 锁定字段保留库内值与来源; 手动字段写入经 ``update_actor``.
+        """
+        if actor.id is None:
+            return None
+        async with self._session() as session:
+            db = await session.get(Actor, actor.id)
+            if db is None:
+                return None
+            data = actor_to_aggregated(actor)
+            locked = locked_fields_of(db)
+            if locked:
+                data = filter_locked_person_data(data, locked=locked, current=actor_to_aggregated(db))
+            apply_aggregated_to_actor(db, data)
+            db.updated_at = _utcnow()
+            session.add(db)
+            if aliases is not None and ActorField.ALIASES not in locked:
+                await replace_actor_aliases(session, db, aliases)
+            await session.commit()
+            await session.refresh(db)
+            return db
+
+    async def get_actor_aliases(self, actor_id: int) -> list[str]:
+        """保序; 不含展示名."""
+        async with self._session() as session:
+            return await list_actor_aliases(session, actor_id)
+
+    async def lookup_actors_by_name(self, name: str) -> list[Actor]:
+        """只读候选, 不创建实体."""
+        async with self._session() as session:
+            return await lookup_actors_by_name(session, name)
+
+    async def add_actor_alias(self, actor_id: int, name: str) -> bool:
+        """幂等追加单个别名行; 演员不存在 / 空名 / 与展示名相同 / 已存在 → False."""
+        async with self._session() as session:
+            actor = await session.get(Actor, actor_id)
+            if actor is None:
+                return False
+            ok = await add_one_actor_alias(session, actor, name)
+            if ok:
+                await session.commit()
+            return ok
+
+    async def remove_actor_alias(self, actor_id: int, name: str) -> bool:
+        """删除单个别名行; 演员不存在 / 行不存在 → False."""
+        async with self._session() as session:
+            if await session.get(Actor, actor_id) is None:
+                return False
+            ok = await remove_one_actor_alias(session, actor_id, name)
+            if ok:
+                await session.commit()
+            return ok
+
+    async def update_actor(
+        self, actor_id: int, *, mode: WriteMode = WriteMode.AUTO, **updates: Unpack[ActorPersonFields]
+    ) -> Actor | None:
+        """不修改 name/id. 不存在返回 None. ``aliases`` 经 ``replace_actor_aliases`` 整表替换.
+
+        写入策略见 ``WriteMode``; 手动调用点须显式传 ``MANUAL``.
+        """
+        async with self._session() as session:
+            actor = await session.get(Actor, actor_id)
+            if actor is None:
+                return None
+            locked = locked_fields_of(actor)
+            if mode is WriteMode.AUTO and locked:
+                filtered: dict[str, object] = {
+                    key: value
+                    for key, value in updates.items()
+                    if key not in _ACTOR_FIELD_NAMES or ActorField(key) not in locked
+                }
+                sources = filtered.get("field_sources")
+                if isinstance(sources, dict):
+                    preserved = {key: value for key, value in (actor.field_sources or {}).items() if key in locked}
+                    filtered["field_sources"] = {
+                        **preserved,
+                        **{key: value for key, value in sources.items() if key not in locked},
+                    }
+                updates = cast("ActorPersonFields", filtered)
+            await _apply_actor_updates(session, actor, updates, mode=mode)
+            await session.commit()
+            await session.refresh(actor)
+            return actor
+
+    async def set_actor_locks(self, actor_id: int, fields: Collection[ActorField]) -> Actor | None:
+        """整体替换锁定字段集合, 不修改 ``updated_at``. 不存在返回 None."""
+        async with self._session() as session:
+            actor = await session.get(Actor, actor_id)
+            if actor is None:
+                return None
+            wanted = set(fields)
+            actor.locked_fields = [str(field) for field in ActorField if field in wanted]
+            session.add(actor)
+            await session.commit()
+            await session.refresh(actor)
+            return actor
+
+    async def clear_actor_person(self, actor_id: int) -> Actor | None:
+        """清空人物档案并解除全部锁 (保留 ``name`` / ``gender``). 不存在返回 None."""
+        async with self._session() as session:
+            actor = await session.get(Actor, actor_id)
+            if actor is None:
+                return None
+            await _clear_person_fields(session, actor)
+            await session.commit()
+            await session.refresh(actor)
+            return actor
+
+    async def batch_set_actor_gender(self, actor_ids: Sequence[int], gender: ActorGender) -> tuple[int, int]:
+        """批量写入同一性别, 返回 ``(写入数, 不存在的 id 数)``; 整个批次只提交一次."""
+        ids = unique_ids(actor_ids)
+        if not ids:
+            return 0, 0
+        async with self._session() as session:
+            actors = (await session.exec(select(Actor).where(col(Actor.id).in_(ids)))).all()
+            for actor in actors:
+                await _apply_actor_updates(session, actor, {"gender": gender}, mode=WriteMode.MANUAL)
+            await session.commit()
+        return len(actors), len(ids) - len(actors)
+
+    async def batch_clear_actor_person(self, actor_ids: Sequence[int]) -> tuple[int, int]:
+        """批量清空人物档案, 返回 ``(清空数, 不存在的 id 数)``; 整个批次只提交一次."""
+        ids = unique_ids(actor_ids)
+        if not ids:
+            return 0, 0
+        async with self._session() as session:
+            actors = (await session.exec(select(Actor).where(col(Actor.id).in_(ids)))).all()
+            for actor in actors:
+                await _clear_person_fields(session, actor)
+            await session.commit()
+        return len(actors), len(ids) - len(actors)
+
+    async def rename_facet(self, kind: FacetKind, facet_id: int, new_name: str) -> FacetItem | None:
+        """先改 Metadata 真值再重投影. 爬取侧同时写单跳 alias, 否则重刮会回到旧名.
+        新名称与另一实体冲突时抛 ``ValueError``; 不存在返回 None.
+        """
+        async with self._session() as session:
+            if kind in LINK_FACETS:
+                return await rename_link_facet(session, LINK_FACETS[kind], facet_id, new_name)
+            if kind in SCALAR_FACETS:
+                return await rename_scalar_facet(session, SCALAR_FACETS[kind], facet_id, new_name)
+            raise ValueError(f"unknown facet kind: {kind}")
+
+    async def merge_facets(self, kind: FacetKind, target_id: int, source_ids: list[int]) -> FacetItem | None:
+        """关联迁到 target, 删除 source. 爬取侧同时写压缩后的 alias.
+        target 不存在返回 None; source 含 target 或不存在则抛 ``ValueError``.
+        """
+        source_id_set = set(source_ids)
+        if target_id in source_id_set:
+            raise ValueError("合并目标不能是来源之一")
+
+        async with self._session() as session:
+            if kind in LINK_FACETS:
+                return await merge_link_facets(session, LINK_FACETS[kind], target_id, source_id_set)
+            if kind in SCALAR_FACETS:
+                return await merge_scalar_facets(session, SCALAR_FACETS[kind], target_id, source_id_set)
+            raise ValueError(f"unknown facet kind: {kind}")
+
+    async def delete_facet(self, kind: FacetKind, facet_id: int) -> bool:
+        """爬取侧写 block 并从真值剔除后再删实体. user_tag 硬删挂载与实体, 不写规则. 不存在返回 False."""
+        async with self._session() as session:
+            if kind == FacetKind.USER_TAG:
+                tag = await session.get(UserTag, facet_id)
+                if tag is None:
+                    return False
+                await purge_user_tag_links(session, facet_id)
+                await session.delete(tag)
+                await session.commit()
+                return True
+            if kind in LINK_FACETS:
+                return await delete_link_facet(session, LINK_FACETS[kind], facet_id)
+            if kind in SCALAR_FACETS:
+                return await delete_scalar_facet(session, SCALAR_FACETS[kind], facet_id)
+            raise ValueError(f"unknown facet kind: {kind}")
+
+    async def list_facet_rules(self, kind: FacetKind) -> list[FacetRule]:
+        if kind not in SCRAPE_FACET_KINDS:
+            raise ValueError(f"facet kind {kind} 不支持规则")
+        async with self._session() as session:
+            stmt = select(FacetRule).where(col(FacetRule.kind) == kind).order_by(asc(col(FacetRule.source_name)))
+            return list((await session.exec(stmt)).all())
+
+    async def delete_facet_rule(self, kind: FacetKind, rule_id: int) -> bool:
+        """删除单条规则; 不回填历史 Metadata. 不存在或 kind 不匹配返回 False."""
+        if kind not in SCRAPE_FACET_KINDS:
+            raise ValueError(f"facet kind {kind} 不支持规则")
+        async with self._session() as session:
+            rule = await session.get(FacetRule, rule_id)
+            if rule is None or rule.kind != kind:
+                return False
+            await session.delete(rule)
+            await session.commit()
+            return True
+
+    async def list_user_tags(self) -> list[UserTag]:
+        async with self._session() as session:
+            result = await session.exec(select(UserTag).order_by(col(UserTag.name).asc()))
+            return list(result.all())
+
+    async def get_user_tag(self, user_tag_id: int) -> UserTag | None:
+        async with self._session() as session:
+            return await session.get(UserTag, user_tag_id)
+
+    async def ensure_user_tags(self, names: Sequence[str]) -> tuple[list[UserTag], int]:
+        """按名称取回或新建用户标签; 返回与入参同序的行与新建数量."""
+        unique = list(dict.fromkeys(names))
+        if not unique:
+            return [], 0
+        async with self._session() as session:
+            try:
+                return await _ensure_user_tags_once(session, unique)
+            except IntegrityError:
+                # 并发同名创建: 双方的 SELECT 都在对方提交前未命中, 后者撞唯一索引.
+                # 回滚重查即可取回对方刚提交的行, 不必把冲突暴露成 500.
+                await session.rollback()
+                return await _ensure_user_tags_once(session, unique)
+
+    async def update_user_tag(self, user_tag_id: int, **updates: Unpack[UserTagUpdates]) -> UserTag | None:
+        async with self._session() as session:
+            tag = await session.get(UserTag, user_tag_id)
+            if tag is None:
+                return None
+            if "name" in updates:
+                tag.name = updates["name"]
+            tag.updated_at = _utcnow()
+            session.add(tag)
+            await session.commit()
+            await session.refresh(tag)
+            return tag
+
+    async def delete_user_tag(self, user_tag_id: int) -> bool:
+        async with self._session() as session:
+            tag = await session.get(UserTag, user_tag_id)
+            if tag is None:
+                return False
+            # 显式删除挂载, 不依赖 SQLite FK pragma
+            await purge_user_tag_links(session, user_tag_id)
+            await session.delete(tag)
+            await session.commit()
+            return True
+
+    async def list_metadata_user_tags(self, metadata_id: int) -> list[UserTag]:
+        async with self._session() as session:
+            stmt = (
+                select(UserTag)
+                .join(MetadataUserTag, col(MetadataUserTag.user_tag_id) == col(UserTag.id))
+                .where(col(MetadataUserTag.metadata_id) == metadata_id)
+                .order_by(col(UserTag.name).asc())
+            )
+            result = await session.exec(stmt)
+            return list(result.all())
+
+    async def list_actor_user_tags(self, actor_id: int) -> list[UserTag]:
+        async with self._session() as session:
+            stmt = (
+                select(UserTag)
+                .join(ActorUserTag, col(ActorUserTag.user_tag_id) == col(UserTag.id))
+                .where(col(ActorUserTag.actor_id) == actor_id)
+                .order_by(col(UserTag.name).asc())
+            )
+            result = await session.exec(stmt)
+            return list(result.all())
+
+    async def apply_metadata_user_tags(
+        self,
+        ids: Sequence[int],
+        user_tag_ids: Sequence[int],
+        *,
+        action: UserTagLinkAction,
+    ) -> UserTagLinkResult:
+        """把一组用户标签应用到一组影片."""
+        async with self._session() as session:
+            return await apply_user_tags_to_metadata(session, ids, user_tag_ids, action)
+
+    async def apply_actor_user_tags(
+        self,
+        ids: Sequence[int],
+        user_tag_ids: Sequence[int],
+        *,
+        action: UserTagLinkAction,
+    ) -> UserTagLinkResult:
+        """把一组用户标签应用到一组演员."""
+        async with self._session() as session:
+            return await apply_user_tags_to_actors(session, ids, user_tag_ids, action)
+
+    async def list_comments(self, metadata_id: int) -> list[Comment]:
+        async with self._session() as session:
+            stmt = (
+                select(Comment)
+                .where(Comment.metadata_id == metadata_id)
+                .order_by(col(Comment.created_at).desc(), col(Comment.id).desc())
+            )
+            result = await session.exec(stmt)
+            return list(result.all())
+
+    async def create_comment(self, metadata_id: int, body: str) -> Comment | None:
+        async with self._session() as session:
+            if await session.get(Metadata, metadata_id) is None:
+                return None
+            # 两个时间列取同一个值: ``updated_at`` 晚于 ``created_at`` 是正文被编辑过的唯一依据.
+            now = _utcnow()
+            comment = Comment(metadata_id=metadata_id, body=body, created_at=now, updated_at=now)
+            session.add(comment)
+            await session.commit()
+            await session.refresh(comment)
+            return comment
+
+    async def update_comment(self, comment_id: int, **updates: Unpack[CommentUpdates]) -> Comment | None:
+        """正文与库中一致时不写库, ``updated_at`` 保持原值."""
+        async with self._session() as session:
+            comment = await session.get(Comment, comment_id)
+            if comment is None:
+                return None
+            if "body" in updates and updates["body"] != comment.body:
+                comment.body = updates["body"]
+                comment.updated_at = _utcnow()
+                session.add(comment)
+                await session.commit()
+                await session.refresh(comment)
+            return comment
+
+    async def delete_comment(self, comment_id: int) -> bool:
+        async with self._session() as session:
+            comment = await session.get(Comment, comment_id)
+            if comment is None:
+                return False
+            await session.delete(comment)
+            await session.commit()
+            return True

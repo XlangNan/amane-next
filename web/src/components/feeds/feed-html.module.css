@@ -1,0 +1,45 @@
+.root {
+  overflow-wrap: anywhere;
+  line-height: 1.6;
+  font-size: var(--mantine-font-size-sm);
+  color: var(--mantine-color-text);
+}
+
+.root :global(img),
+.root :global(video) {
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--mantine-radius-sm);
+}
+
+.root :global(a) {
+  color: var(--mantine-color-anchor);
+}
+
+.root :global(pre),
+.root :global(code) {
+  overflow-x: auto;
+  max-width: 100%;
+}
+
+.root :global(table) {
+  display: block;
+  overflow-x: auto;
+  max-width: 100%;
+  border-collapse: collapse;
+}
+
+.root :global(p) {
+  margin: 0 0 0.6em;
+}
+
+.root :global(p:last-child) {
+  margin-bottom: 0;
+}
+
+.root :global(blockquote) {
+  margin: 0.5em 0;
+  padding-left: 0.8em;
+  border-left: 3px solid var(--mantine-color-default-border);
+  color: var(--mantine-color-dimmed);
+}
