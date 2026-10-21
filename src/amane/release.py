@@ -16,8 +16,8 @@ from packaging.version import InvalidVersion, Version
 
 from .version import get_version
 
-GITHUB_RELEASES_URL = "https://api.github.com/repos/sqzw-x/amane/releases?per_page=100"
-GITHUB_RELEASES_PAGE = "https://github.com/sqzw-x/amane/releases"
+GITHUB_RELEASES_URL = "https://api.github.com/repos/XlangNan/amane-next/releases?per_page=100"
+GITHUB_RELEASES_PAGE = "https://github.com/XlangNan/amane-next/releases"
 logger = logging.getLogger(__name__)
 
 _CACHE_TTL_S = 3600.0
@@ -25,7 +25,7 @@ _TIMEOUT_S = 10.0
 
 
 def _user_agent() -> str:
-    return f"Amane/{get_version()} (+https://github.com/sqzw-x/amane)"
+    return f"Amane-next/{get_version()} (+https://github.com/XlangNan/amane-next)"
 
 
 def _strip_v(tag: str) -> str:

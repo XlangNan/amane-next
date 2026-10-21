@@ -3,6 +3,7 @@
 import re
 from io import StringIO
 from typing import TYPE_CHECKING
+from urllib.parse import urlsplit
 
 import aiofiles
 import structlog
@@ -10,6 +11,7 @@ import structlog
 from ..utils.text import strip_illegal_xml_chars
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
     from pathlib import Path
 
     from ..db.models import Metadata
@@ -35,7 +37,18 @@ def _escape_xml(text: str) -> str:
     return escaped
 
 
-async def write_nfo(metadata: Metadata, nfo_path: Path) -> bool:
+def remote_avatar_url(image_urls: list[str] | None) -> str | None:
+    """头像列表里第一个 http(s) 外链; 内部资源地址 (``/api/resources/...``) 外部不可达, 不写进 NFO."""
+    for url in image_urls or []:
+        parts = urlsplit(url)
+        if parts.scheme in ("http", "https") and parts.netloc:
+            return url
+    return None
+
+
+async def write_nfo(metadata: Metadata, nfo_path: Path, actor_images: Mapping[str, str] | None = None) -> bool:
+    """``actor_images``: 演员名 → 头像外链, 写入 ``<actor><thumb>``; 缺项的演员只写名字."""
+    images = actor_images or {}
     try:
         nfo_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -72,6 +85,8 @@ async def write_nfo(metadata: Metadata, nfo_path: Path) -> bool:
                 code.write("  <actor>\n")
                 code.write(f"    <name>{_escape_xml(actor)}</name>\n")
                 code.write("    <type>Actor</type>\n")
+                if (avatar := images.get(actor)) is not None:
+                    code.write(f"    <thumb>{_escape_xml(avatar)}</thumb>\n")
                 code.write("  </actor>\n")
 
         if metadata.score is not None:

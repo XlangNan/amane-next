@@ -13,6 +13,7 @@ from ..enums import ActorGender, DownloadableResource, LinkMode
 from ..library import MEDIA_EXTENSIONS, LibraryFileKind, LibraryScan, ancestor_dirs, prune_empty_dirs
 from ..library.rules import is_in_trash
 from ..media import ResourceStore, apply_cover_watermarks_from_info, crop_poster
+from ..media import remote_avatar_url
 from ..media import write_nfo as write_nfo_file
 from ..media.resource_store import internal_url_hash
 from ..net.http import WebClient
@@ -83,6 +84,7 @@ async def execute_file_operations(
     safe_dirs: Sequence[Path] | None = (),
     watermark_dir: Path | None = None,
     actor_genders: dict[str, ActorGender] | None = None,
+    actor_images: dict[str, str] | None = None,
 ) -> FileOperationsResult:
     """``file_info`` 由渲染路径的那一次 ``parse_file_info`` 产出, 必须带上 ``has_external_subtitle``.
 
@@ -161,7 +163,7 @@ async def execute_file_operations(
 
     # 写入 NFO.
     if org_result.outcome is PlaceOutcome.PLACED and org_result.dest and write_nfo:
-        await write_nfo_file(metadata, paths.nfo)
+        await write_nfo_file(metadata, paths.nfo, actor_images)
 
     # 字幕按模板落到 video_dest 侧.
     subtitle_conflicts: list[SubtitleConflict] = []
@@ -217,7 +219,9 @@ async def apply_file_operations(
     # 渲染路径后执行落盘.
     ext = Path(media_file.path).suffix.lstrip(".")
     file_info = parse_file_info(media_file.path, has_external_subtitle=media_file.has_external_subtitle)
-    actor_genders = {a.name: a.gender for a in await repo.get_actors_by_names(metadata.actors)}
+    actors = await repo.get_actors_by_names(metadata.actors)
+    actor_genders = {a.name: a.gender for a in actors}
+    actor_images = {a.name: url for a in actors if (url := remote_avatar_url(a.image_urls)) is not None}
     paths = resolve_paths(
         library,
         metadata,
@@ -243,6 +247,7 @@ async def apply_file_operations(
         safe_dirs=safe_dirs,
         watermark_dir=watermark_dir,
         actor_genders=actor_genders,
+        actor_images=actor_images,
     )
 
 

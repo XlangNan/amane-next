@@ -79,10 +79,10 @@ async def test_check_release(client: HttpxClient, app: FastAPI) -> None:
     cases: list[tuple[ReleaseSnapshot, dict[str, object]]] = [
         (ReleaseSnapshot(None, None), {"latest": None, "html_url": None, "newer": False}),
         (
-            ReleaseSnapshot("v99.0.0", "https://github.com/sqzw-x/amane/releases/tag/v99.0.0"),
+            ReleaseSnapshot("v99.0.0", "https://github.com/XlangNan/amane-next/releases/tag/v99.0.0"),
             {
                 "latest": "v99.0.0",
-                "html_url": "https://github.com/sqzw-x/amane/releases/tag/v99.0.0",
+                "html_url": "https://github.com/XlangNan/amane-next/releases/tag/v99.0.0",
                 "newer": True,
             },
         ),

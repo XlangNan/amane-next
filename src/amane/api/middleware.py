@@ -24,7 +24,7 @@ _NOISY_PATHS = frozenset({"/api/ws", "/favicon.ico", "/api/system/desktop"})
 #: 下发同值 cookie 供其使用. SameSite=Lax + host-only 使跨站嵌入 / 跨站 fetch 不
 #: 带 cookie — rebinding 防线不弱化. token 本身不出现在 URL / 访问日志.
 API_TOKEN_COOKIE = "amane_token"
-_COOKIE_MAX_AGE = 30 * 24 * 3600
+_COOKIE_MAX_AGE = 365 * 24 * 3600
 
 
 class TokenAuthMiddleware(BaseHTTPMiddleware):

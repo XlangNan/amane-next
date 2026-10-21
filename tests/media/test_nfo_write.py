@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from amane.db.models import Metadata
-from amane.media import write_nfo
+from amane.media import remote_avatar_url, write_nfo
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -65,3 +65,27 @@ async def test_write_nfo_plot_is_plain_text(tmp_path: Path):
     root = ET.fromstring(content)
     assert root.findtext("plot") == "结尾 ]]> 之后 & <标签>\n\n第二段"
     assert root.findtext("outline") == root.findtext("plot")
+
+
+@pytest.mark.parametrize(
+    ("image_urls", "expected"),
+    [
+        (None, None),
+        ([], None),
+        (["/api/resources/abcd1234"], None),
+        (["ftp://x/a.jpg", "not a url"], None),
+        (["/api/resources/abcd1234", "https://img.example/a.jpg"], "https://img.example/a.jpg"),
+        (["http://img.example/a.jpg", "https://img.example/b.jpg"], "http://img.example/a.jpg"),
+    ],
+)
+def test_remote_avatar_url(image_urls: list[str] | None, expected: str | None):
+    assert remote_avatar_url(image_urls) == expected
+
+
+@pytest.mark.asyncio(loop_scope="function")
+async def test_write_nfo_actor_thumb_only_for_known_avatars(tmp_path: Path, metadata: Metadata):
+    nfo_path = tmp_path / "MIDV-123.nfo"
+    assert await write_nfo(metadata, nfo_path, {"Actor A": "https://img.example/a.jpg?x=1&y=2"}) is True
+    actors = {a.findtext("name"): a for a in ET.fromstring(nfo_path.read_text(encoding="utf-8")).findall("actor")}
+    assert actors["Actor A"].findtext("thumb") == "https://img.example/a.jpg?x=1&y=2"
+    assert actors["Actor B"].find("thumb") is None
