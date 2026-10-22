@@ -47,6 +47,7 @@ if TYPE_CHECKING:
     from ..agent import AgentService
     from ..config import BrowserConfig, ConfigManager, HotSettings
     from ..db.repository import Repository
+    from ..emby import EmbyActorSync
     from ..events import EventBus
     from ..handlers.protocol import TaskHandler
     from ..media import ResourceStore
@@ -226,6 +227,7 @@ class AppRuntime:
     inventory_store: InventoryStore = field(default_factory=InventoryStore)
     browser: BrowserPool | None = None
     r18_handle: R18Handle | None = None
+    emby_sync: EmbyActorSync | None = None
 
     _r18_config: R18Config | None = field(default=None, repr=False)
     _browser_key: tuple[BrowserConfig, str | None] | None = field(default=None, repr=False)

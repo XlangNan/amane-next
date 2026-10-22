@@ -20,6 +20,7 @@ import { SortMenu } from "@/components/common/sort-menu";
 import { ActorFilterControls } from "@/components/media/actor-filter-controls";
 import { ActorGrid } from "@/components/media/actor-grid";
 import { ActorTable } from "@/components/media/actor-table";
+import { EmbySyncButton } from "@/components/media/emby-sync-button";
 import {
   ACTOR_RANGE_FILTERS,
   type ActorFilterKey,
@@ -204,7 +205,12 @@ function ActorsIndexPage() {
     <BrowsePageShell
       fill={isList}
       title={<Title order={2}>{t("actors.title")}</Title>}
-      actions={<ListDefaultActions update={{ key: "actors", value: actorListDefaults(search) }} />}
+      actions={
+        <Group gap="xs" wrap="nowrap">
+          <EmbySyncButton />
+          <ListDefaultActions update={{ key: "actors", value: actorListDefaults(search) }} />
+        </Group>
+      }
       viewSwitch={
         <SegmentedControl
           value={search.view}

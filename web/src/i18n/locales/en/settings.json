@@ -11,7 +11,8 @@
     "sr": "Super Resolution",
     "llm": "LLM Translation",
     "watermark": "Watermark",
-    "notify": "Notifications"
+    "notify": "Notifications",
+    "emby": "Emby"
   },
   "config": {
     "loadError": "Failed to load configuration"
@@ -873,6 +874,56 @@
         "label": "Use Proxy",
         "description": "Send through the global proxy under Network; DingTalk is reachable directly, so usually leave off"
       }
+    },
+    "emby": {
+      "enabled": {
+        "label": "Sync actor avatars",
+        "description": "Upload avatars amane already has locally to people in Emby / Jellyfin that have none, so Emby needs no internet access"
+      },
+      "url": {
+        "label": "Server URL",
+        "description": "e.g. http://192.168.1.10:8096 (a trailing / or /emby is ignored)"
+      },
+      "api_key": {
+        "label": "API key",
+        "description": "Emby dashboard → Advanced → API Keys → New"
+      },
+      "interval_minutes": {
+        "label": "Sync interval",
+        "description": "Minutes between automatic syncs; each run only handles people still without an avatar. A sync also runs right after saving"
+      },
+      "auto_after_batch": {
+        "label": "Sync after each batch",
+        "description": "After a scrape / organize batch finishes, ask Emby to scan its libraries, wait the minutes below, then sync avatars. Emby refreshes the whole library, which keeps it busy for a while on big libraries"
+      },
+      "refresh_wait_minutes": {
+        "label": "Scan wait",
+        "description": "Minutes to wait after asking Emby to scan before syncing; people only exist in Emby once it has scanned. Anything left over is picked up by the periodic sync"
+      },
+      "use_proxy": {
+        "label": "Use proxy",
+        "description": "Go through the global proxy in Network; Emby is usually on the LAN, so leave this off"
+      }
     }
+  },
+  "embySync": {
+    "button": "Sync actor avatars",
+    "hint": "Upload avatars amane already has locally to Emby. Set the URL and key in Settings → Emby",
+    "failed": "Sync failed",
+    "loadFailed": "Could not read Emby libraries",
+    "title": "Sync actor avatars to Emby",
+    "libraries": "Emby libraries",
+    "librariesPlaceholder": "Empty = the whole Emby server",
+    "mode": "Mode",
+    "modeFill": "Fill missing",
+    "modeOverwrite": "Overwrite",
+    "modeFillHint": "Only upload for people in Emby that have no avatar; existing avatars stay",
+    "modeOverwriteHint": "Replace avatars Emby already has with amane's, re-uploading every time",
+    "run": "Start",
+    "close": "Close",
+    "summary": "Emby has {{persons}} people ({{skipped}} skipped as they already have an avatar), {{targeted}} processed, {{uploaded}} uploaded",
+    "noLocal": "No local avatar in amane: {{count}} ({{names}}); run actor scraping for them first",
+    "notInAmane": "No actor with the same name in amane: {{count}} ({{names}})",
+    "failedLine": "Upload failed: {{count}} ({{names}}); see the log"
   }
 }

@@ -30,6 +30,7 @@ async def update_config(req: dict[str, Any], config: ConfigDep, runtime: Runtime
     logger.info("config update requested", sections=changed_sections)
 
     notify_before = config.hot.notify.model_copy()
+    emby_before = config.hot.emby.model_copy()
     try:
         preview = config.preview(req)
         if runtime.plugin_manager is not None:
@@ -55,6 +56,18 @@ async def update_config(req: dict[str, Any], config: ConfigDep, runtime: Runtime
             logger.info("dingtalk confirmation sent")
         else:
             logger.warning("dingtalk confirmation failed", error=failure)
+
+    # Emby 刚启用或地址 / 密钥改过: 立刻在后台同步一轮, 不必等下一个周期.
+    emby_after = config.hot.emby
+    if (
+        emby_after.enabled
+        and emby_after.url
+        and emby_after.api_key
+        and (emby_after.enabled, emby_after.url, emby_after.api_key)
+        != (emby_before.enabled, emby_before.url, emby_before.api_key)
+        and runtime.emby_sync is not None
+    ):
+        runtime.emby_sync.trigger()
 
     await runtime.event_bus.broadcast(Event(type=EventType.LOG, data={"type": "config.updated"}))
 

@@ -73,6 +73,10 @@ Worker 在 `handle()` 前注入 `report_progress` 回调, 经 EventBus 发 `task
 
 `src/amane/notify/batch.py::BatchNotifier` 以 `EventBus.add_listener` 注册, 只消费 `task.completed` / `task.failed` 中的 SCRAPE / ORGANIZE 结果, 按影片归并 (后到者覆盖); 队列无 QUEUED / RUNNING 且静默期满, 或超过最长等待, 才发送. 监听器异常被吞, 不得影响广播与任务完成. WebClient 随配置重建, 通知器须经回调取最新实例.
 
+### Emby 头像同步
+
+`src/amane/emby/sync.py::EmbyActorSync` 不走任务队列, 由 `start_app` 创建并挂到 `runtime.emby_sync`: 周期循环 + 配置变更时 `trigger()` + 手动 `POST /api/emby/sync-actors`. 按 Emby 人物而不是按影片处理 (Emby 的人物图片不随 NFO 刷新). 周期同步固定为全服务器、只补缺主图的人物; 另经 `on_event` (EventBus 监听器) 监听 SCRAPE / ORGANIZE 收尾, 队列清空并静默后 `POST /Library/Refresh`, 等 `refresh_wait_minutes` 再同步 (与 `BatchNotifier` 互不依赖); 手动同步经 `SyncRequest` 可限定媒体库 (取该库影片的演员表, 不走 `/Persons`) 并选覆盖已有. 头像取自 `ResourceStore` 已有的本地文件, 不触发下载; 密钥只放请求头. WebClient 随配置重建, 须经回调取最新实例.
+
 ### 站点结果上报
 
 SCRAPE 与 ACTOR_SCRAPE 的每个站点结果经 `invoke_source` 写入任务摘要 (契约见 [observability.md](observability.md)「站点结果单一导出」). HTTP / 拦截失败带 `SourceError` 上的 `FailureReason` 与 HTTP 状态; 未命中是 `None` → `no_usable_metadata`; 意外异常记 `unexpected` 后继续其它源.

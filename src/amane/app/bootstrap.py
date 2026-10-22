@@ -16,6 +16,7 @@ from ..config.token import resolve_api_token
 from ..db.engine import create_async_engine_from_path
 from ..db.profiling import DbLogPolicy
 from ..db.repository import Repository
+from ..emby import EmbyActorSync
 from ..events import EventBus
 from ..handlers import LibraryTaskLocks
 from ..library import InventoryStore
@@ -70,12 +71,15 @@ class AppSession:
     _feed_task: asyncio.Task[None]
     _emitter_task: asyncio.Task[None] | None = field(default=None, repr=False)
     _notifier: BatchNotifier | None = field(default=None, repr=False)
+    _emby_sync: EmbyActorSync | None = field(default=None, repr=False)
 
     async def aclose(self) -> None:
         logger.info("shutting down amane service")
         await self.runtime.event_bus.close_all()
         if self._notifier is not None:
             await self._notifier.aclose()
+        if self._emby_sync is not None:
+            await self._emby_sync.aclose()
         if self._emitter_task is not None:
             self._emitter_task.cancel()
             with suppress(asyncio.CancelledError):
@@ -257,6 +261,10 @@ async def start_app(config: ConfigManager | None = None) -> AppSession:
     # 通知器取最新配置与 WebClient: 二者都会随配置更新被替换.
     notifier = BatchNotifier(repo, lambda: config.hot, lambda: runtime.web_client)
     event_bus.add_listener(notifier.on_event)
+    emby_sync = EmbyActorSync(repo, resource_store, lambda: config.hot, lambda: runtime.web_client)
+    runtime.emby_sync = emby_sync
+    event_bus.add_listener(emby_sync.on_event)
+    emby_sync.start()
     agent_service.bridge.safe_dirs = None if safe_dirs is None else list(safe_dirs)
     agent_service.bridge.watcher = watcher_service
     agent_service.bridge.cancel_running_task = runtime.cancel_task
@@ -272,4 +280,5 @@ async def start_app(config: ConfigManager | None = None) -> AppSession:
         _feed_task=feed_task,
         _emitter_task=emitter_task,
         _notifier=notifier,
+        _emby_sync=emby_sync,
     )

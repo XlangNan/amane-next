@@ -36,11 +36,15 @@
 
 注意: Emby 是否读取这个字段, 以及能否访问到该外链, 取决于 Emby 的版本和网络. 另外 Emby 需要在媒体库里开启 NFO 读取, 演员信息才会进入 Emby.
 
-### 4. 登录
+### 4. Emby 头像同步
+
+Emby 的演员头像不随 NFO 更新, 且常因无法访问外网而下载失败. 新增「设置 → Emby」: 填 Emby 地址和 API 密钥后, amane 把本地已下载的演员头像直接上传给 Emby 里还没有头像的演员, 周期执行并在保存设置后立即执行一次. 「演员」页右上角有「同步演员头像」按钮可手动触发, 可选 Emby 媒体库, 并选择「只补缺失」或「覆盖已有」. 默认还会在一批刮削 / 整理完成后自动通知 Emby 扫描, 等几分钟后自动同步头像 (可在设置里关闭). 说明见 [docs/user/configuration.md](docs/user/configuration.md) 的「Emby 头像同步」.
+
+### 5. 登录
 
 登录页文案改为「访问密码」, 密码即 `AMANE_TOKEN`; 登录状态保存时间由 30 天延长到 365 天.
 
-### 5. 品牌与版本
+### 6. 品牌与版本
 
 - 界面左上角名称改为 Amane-next, 使用新的橙色图标 (与上游蓝色图标区分)
 - 版本检查读取 [XlangNan/amane-next](https://github.com/XlangNan/amane-next/releases) 的 Release, 不再检查上游

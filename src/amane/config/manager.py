@@ -758,6 +758,24 @@ class NotifyConfig(BaseModel):
     """经「网络」里的全局代理发送. 钉钉是国内服务, 默认直连."""
 
 
+class EmbyConfig(BaseModel):
+    """Emby / Jellyfin 演员头像同步: 把 amane 本地已有的头像上传给媒体服务器里还没有头像的演员."""
+
+    enabled: bool = False
+    url: str = Field(default="", pattern=r"^(https?://\S+)?$")
+    """媒体服务器地址, 如 ``http://192.168.1.10:8096``; 末尾的 ``/`` 与 ``/emby`` 会被忽略."""
+    api_key: str = ""
+    """控制台 → 高级 → API 密钥 里新建的密钥."""
+    interval_minutes: int = Field(default=30, ge=1, le=1440)
+    """自动同步的间隔; 每轮只处理还没有头像的演员, 没有就不上传."""
+    auto_after_batch: bool = True
+    """一批刮削 / 整理完成后, 自动通知 Emby 扫描媒体库, 等 ``refresh_wait_minutes`` 分钟后再同步头像."""
+    refresh_wait_minutes: int = Field(default=3, ge=1, le=60)
+    """通知 Emby 扫描后等多久再同步: 演员要先被 Emby 扫描入库才存在. 没传完的由周期同步补上."""
+    use_proxy: bool = False
+    """经「网络」里的全局代理访问. 媒体服务器通常在内网, 默认直连."""
+
+
 class HotSettings(BaseModel):
     """运行时可更新, 持久化到 TOML. extra=forbid, 未知字段须校验失败."""
 
@@ -817,6 +835,7 @@ class HotSettings(BaseModel):
     worker: WorkerConfig = WorkerConfig()
     logging: LoggingConfig = LoggingConfig()
     notify: NotifyConfig = NotifyConfig()
+    emby: EmbyConfig = EmbyConfig()
     plugins: dict[str, PluginConfig] = Field(default_factory=dict, json_schema_extra={"x-hidden": True})
 
 

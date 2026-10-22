@@ -1686,6 +1686,7 @@ export type HotSettings = {
     worker?: WorkerConfig;
     logging?: LoggingConfig;
     notify?: NotifyConfig;
+    emby?: EmbyConfig;
     /**
      * Plugins
      */
@@ -5025,6 +5026,42 @@ export type ValidationError = {
     ctx?: {
         [key: string]: unknown;
     };
+};
+
+/**
+ * EmbyConfig
+ *
+ * Emby / Jellyfin 演员头像同步: 把 amane 本地已有的头像上传给媒体服务器里还没有头像的演员.
+ */
+export type EmbyConfig = {
+    /**
+     * Enabled
+     */
+    enabled?: boolean;
+    /**
+     * Url
+     */
+    url?: string;
+    /**
+     * Api Key
+     */
+    api_key?: string;
+    /**
+     * Interval Minutes
+     */
+    interval_minutes?: number;
+    /**
+     * Auto After Batch
+     */
+    auto_after_batch?: boolean;
+    /**
+     * Refresh Wait Minutes
+     */
+    refresh_wait_minutes?: number;
+    /**
+     * Use Proxy
+     */
+    use_proxy?: boolean;
 };
 
 /**

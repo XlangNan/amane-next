@@ -11,7 +11,8 @@
     "sr": "图像超分",
     "llm": "LLM 翻译",
     "watermark": "水印",
-    "notify": "通知"
+    "notify": "通知",
+    "emby": "Emby"
   },
   "config": {
     "loadError": "加载配置失败"
@@ -873,6 +874,56 @@
         "label": "使用代理",
         "description": "经「网络」里的全局代理发送; 钉钉在国内, 一般保持关闭"
       }
+    },
+    "emby": {
+      "enabled": {
+        "label": "启用演员头像同步",
+        "description": "把 amane 本地已有的演员头像上传给 Emby / Jellyfin 里还没有头像的演员, 不依赖 Emby 访问外网"
+      },
+      "url": {
+        "label": "服务器地址",
+        "description": "如 http://192.168.1.10:8096 (Emby 的访问地址, 末尾的 / 和 /emby 可省略)"
+      },
+      "api_key": {
+        "label": "API 密钥",
+        "description": "Emby 控制台 → 高级 → API 密钥 → 新建"
+      },
+      "interval_minutes": {
+        "label": "同步间隔",
+        "description": "自动同步的间隔 (分钟); 每轮只处理仍没有头像的演员. 保存设置后会立刻同步一次"
+      },
+      "auto_after_batch": {
+        "label": "批次完成后自动同步",
+        "description": "一批刮削 / 整理做完后, 自动通知 Emby 扫描媒体库, 等待下面设置的分钟数后同步头像. 会让 Emby 刷新整个库, 库很大时它会忙一阵"
+      },
+      "refresh_wait_minutes": {
+        "label": "扫描等待时间",
+        "description": "通知 Emby 扫描后等多少分钟再同步 (分钟); 演员要先被 Emby 扫描入库才存在. 没传完的由周期同步补上"
+      },
+      "use_proxy": {
+        "label": "使用代理",
+        "description": "经「网络」里的全局代理访问; Emby 通常在内网, 一般保持关闭"
+      }
     }
+  },
+  "embySync": {
+    "button": "同步演员头像",
+    "hint": "把 amane 本地已有的演员头像上传给 Emby. 地址和密钥在「设置 → Emby」里填写",
+    "failed": "同步失败",
+    "loadFailed": "无法读取 Emby 媒体库",
+    "title": "同步演员头像到 Emby",
+    "libraries": "Emby 媒体库",
+    "librariesPlaceholder": "留空 = 整个 Emby",
+    "mode": "同步方式",
+    "modeFill": "只补缺失",
+    "modeOverwrite": "覆盖已有",
+    "modeFillHint": "只给 Emby 里还没有头像的演员上传, 已有头像的不动",
+    "modeOverwriteHint": "用 amane 的头像替换 Emby 里已有的头像, 包括已经有的; 每次都会重新上传",
+    "run": "开始同步",
+    "close": "关闭",
+    "summary": "Emby 共 {{persons}} 位演员 (已有头像而跳过 {{skipped}}), 本次处理 {{targeted}}, 已上传 {{uploaded}}",
+    "noLocal": "amane 里没有本地头像: {{count}} 位 ({{names}}); 先对这些演员做演员刮削",
+    "notInAmane": "amane 演员库里找不到同名演员: {{count}} 位 ({{names}})",
+    "failedLine": "上传失败: {{count}} 位 ({{names}}); 详情见日志"
   }
 }
