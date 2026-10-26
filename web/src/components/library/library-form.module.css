@@ -1,0 +1,93 @@
+/* 三列共用行轨: 标题 / 说明 / 控件各自对齐. 窄屏按字段堆叠, 避免输入框被压扁. */
+
+.alignedRow {
+  display: grid;
+  width: 100%;
+  column-gap: var(--mantine-spacing-md);
+  row-gap: 0;
+  align-items: center;
+  grid-template-columns: 1fr;
+  grid-template-areas:
+    "l1"
+    "d1"
+    "c1"
+    "l2"
+    "d2"
+    "c2"
+    "l3"
+    "d3"
+    "c3";
+}
+
+.l1 {
+  grid-area: l1;
+}
+.l2 {
+  grid-area: l2;
+  margin-top: var(--mantine-spacing-sm);
+}
+.l3 {
+  grid-area: l3;
+  margin-top: var(--mantine-spacing-sm);
+}
+
+.d1 {
+  grid-area: d1;
+}
+.d2 {
+  grid-area: d2;
+}
+.d3 {
+  grid-area: d3;
+}
+
+.c1,
+.c2,
+.c3 {
+  margin-top: calc(var(--mantine-spacing-xs) / 2);
+  min-width: 0;
+}
+
+.c1 {
+  grid-area: c1;
+}
+
+.c2 {
+  grid-area: c2;
+}
+
+.c3 {
+  grid-area: c3;
+  display: flex;
+  align-items: center;
+  min-height: var(--input-height-sm, 36px);
+}
+
+/* SegmentedControl 不是 Input, Wrapper 不会注入 description→控件间距.
+   高度与 TextInput sm 对齐, 切换 ingest 时这一行的行高不变. */
+.ingestControl {
+  margin-top: calc(var(--mantine-spacing-xs) / 2);
+  height: var(--input-height-sm, 36px);
+  display: flex;
+  align-items: stretch;
+}
+
+.ingestControl > :global(*) {
+  height: 100%;
+  box-sizing: border-box;
+}
+
+@media (min-width: 48em) {
+  .alignedRow {
+    grid-template-columns: minmax(16rem, 1fr) max-content max-content;
+    grid-template-areas:
+      "l1 l2 l3"
+      "d1 d2 d3"
+      "c1 c2 c3";
+  }
+
+  .l2,
+  .l3 {
+    margin-top: 0;
+  }
+}

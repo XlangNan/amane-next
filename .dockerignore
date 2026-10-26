@@ -1,0 +1,55 @@
+# VCS / IDE
+.git
+.github
+.claude
+.cursor
+.vscode
+.idea
+*.md
+!README.md
+
+# Local envs & secrets
+.env
+.env.*
+.venv
+venv
+__pycache__
+*.py[cod]
+.pytest_cache
+.ruff_cache
+.mypy_cache
+.coverage
+coverage.xml
+coverage_html
+htmlcov
+
+# Frontend local artifacts (rebuilt in image)
+web/node_modules
+web/dist
+web/.vite
+**/*.tsbuildinfo
+
+# Runtime / local data
+data
+logs
+*.db
+*.sqlite
+*.sqlite3
+
+# Misc
+.DS_Store
+node_modules
+dist
+build
+*.egg-info
+.prek
+.pre-commit-config.yaml
+Justfile
+compose.yaml
+docs
+tests
+scripts
+resources
+openapi.json
+**/.npm
+**/pnpm-store

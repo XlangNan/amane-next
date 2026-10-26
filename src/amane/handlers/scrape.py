@@ -1,0 +1,326 @@
+from collections.abc import Iterable, Sequence
+from typing import TYPE_CHECKING, Protocol
+
+from structlog.contextvars import bind_contextvars
+
+from ..aggregate import SCALAR_FIELDS, AggregatedMetadata, CrawlerLike, FieldLanguage, aggregate, compile_priority
+from ..crawlers.models import SearchQuery
+from ..crawlers.site_roles import builtin_descriptors
+from ..db.models import TaskType
+from ..enums import ActorGender, MetadataField
+from ..media import materialize_images
+from ..observability import current
+from ..observability.models import SiteOutcomeKind
+from ..plugins.models import SourceDescriptor, SourceTrait
+from ..translate import GoogleTranslator
+from ._common import ensure_oshash, finalize_media_file
+from .models import ActorScrapePayload, CacheKind, OrganizePayload, ScrapePayload, ScrapeResult
+from .protocol import FollowupTask, TaskHandler, TaskResult
+
+if TYPE_CHECKING:
+    from ..config import HotSettings
+    from ..db.models import MediaFile
+    from ..db.repository import Repository
+    from ..media import ResourceStore
+    from ..net.http import WebClient
+
+# 进度: 聚合按已满足标量字段计数; 其后固定两步 (物化图片 / 持久化).
+_PROGRESS_POST_STEPS = 2
+
+
+class CrawlerFactoryLike(Protocol):
+    async def get_crawlers(self, names: Iterable[str]) -> dict[str, CrawlerLike]: ...
+
+
+class ScrapeHandler(TaskHandler[ScrapePayload, ScrapeResult]):
+    """不移动库内文件; 库目录落盘由 ORGANIZE 负责."""
+
+    def __init__(
+        self,
+        repo: Repository,
+        factory: CrawlerFactoryLike,
+        resource_store: ResourceStore,
+        pipeline_config: HotSettings,
+        web_client: WebClient | None = None,
+        source_catalog: Sequence[SourceDescriptor] | None = None,
+    ):
+        super().__init__(payload_t=ScrapePayload, result_t=ScrapeResult)
+        self._repo = repo
+        self._factory = factory
+        self._config = pipeline_config
+        self._web_client = web_client
+        self._translator = GoogleTranslator(web_client) if web_client is not None else None
+        self._resource_store = resource_store
+        # 调度事实只从来源目录读取: 内置来源的 descriptor 由 profile() 合成, 插件来源由插件声明.
+        catalog = source_catalog if source_catalog is not None else builtin_descriptors()
+        self._multi_language_sources = frozenset(d.id for d in catalog if SourceTrait.MULTI_LANGUAGE in d.traits)
+        self._partial_sources = frozenset(d.id for d in catalog if SourceTrait.NEEDS_PARTIAL in d.traits)
+        self._file_hash_sources = frozenset(d.id for d in catalog if SourceTrait.USES_FILE_HASH in d.traits)
+
+    async def handle(self, payload: ScrapePayload) -> TaskResult[ScrapeResult]:
+        bind_contextvars(number=payload.number)
+
+        content_type = payload.content_type
+        progress_total = len(SCALAR_FIELDS) + _PROGRESS_POST_STEPS
+        rec = current()
+
+        # 启用 metadata 缓存时读取 raw 快照.
+        use_metadata_cache = CacheKind.metadata in payload.use_cache
+        db_data = await self._repo.get_metadata_by_number(payload.number) if use_metadata_cache else None
+        if db_data is not None and db_data.raw:
+            rec.write_raw_cache(db_data.raw)
+
+        # 校验 content_type 路由; 无资格站点则失败.
+        route = self._config.scraping.content_routes.get(content_type)
+        if not route:
+            rec.warning("no eligible crawlers for content type", content_type=content_type)
+            return TaskResult(success=False, error=f"内容类型 {content_type} 没有可用来源")
+        rec.info("scraping started", content_type=str(content_type), crawlers=route)
+        rec.update_summary(eligible_sites=[str(s) for s in route])
+
+        crawlers = await self._factory.get_crawlers(route)
+        if not crawlers:
+            current().warning("no crawlers available", requested=route)
+            return TaskResult(success=False, error=f"番号 {payload.number} 没有可用来源")
+
+        file = None
+        if payload.media_file_id:
+            file = await self._repo.get_media_file(media_id=payload.media_file_id)
+
+        # 仅当本次可用来源声明需要指纹时计算 oshash.
+        file_hash = file.oshash if file else None
+        if file is not None and file_hash is None and any(name in self._file_hash_sources for name in crawlers):
+            file_hash = await ensure_oshash(self._repo, file)
+
+        q = SearchQuery(
+            payload.number,
+            file.path if file else None,
+            file_hash,
+            payload.content_type,
+        )
+
+        field_priority = compile_priority(
+            route, self._config.scraping.field_priority, self._config.scraping.field_blacklist
+        )
+        field_language = self._config.scraping.field_language
+
+        await self.report_progress(0, progress_total, "fetch")
+
+        async def _on_fetch_progress(current: int, _total: int, message: str = "") -> None:
+            # aggregate 上报的 current 是已满足标量字段数; 分母由 handler 统一为含后续步骤的 total.
+            await self.report_progress(current, progress_total, message)
+
+        # 出站: 执行获取图 (execute_graph), 声明依赖的来源在第二段; 按 use_cache 复用 raw 快照.
+        result = await aggregate(
+            q,
+            crawlers,
+            field_priority,
+            field_language,
+            db_data.raw if db_data else None,
+            on_progress=_on_fetch_progress,
+            multi_lang_sites=self._multi_language_sources,
+            deferred_sites=frozenset(name for name in crawlers if name in self._partial_sources),
+        )
+
+        # 站点结果已由引擎 _fetch_one 逐条上报到 summary.outcomes; 这里只记录调度顺序.
+        rec.update_summary(sites_queried=list(result.sites_queried))
+
+        # 标量可以全空: 只要有来源返回结果, 海报 / 评分 / external_id 仍可入库.
+        if not result.raw:
+            current().warning("no data found from any source", failed_sites=result.failed_sites)
+            # 失败也要能回答"为什么刮不到": 站点明细随失败结果落库.
+            return TaskResult(
+                success=False,
+                error=f"未找到 {payload.number} 的元数据",
+                result=ScrapeResult(
+                    field_sources=result.field_sources,
+                    failed_sites=list(result.failed_sites),
+                    outcomes=current().site_outcomes(),
+                ),
+            )
+
+        if self._translator is not None and self._config.translate.enabled:
+            await self._translate_metadata(result.metadata, field_language)
+
+        # 获取结束: 进度分子对齐标量字段数, 其后为物化与持久化.
+        await self.report_progress(len(SCALAR_FIELDS), progress_total, "fetch")
+
+        # 物化到 Resource; 失败保留原始 URL.
+        poster_out = result.metadata.poster_urls
+        thumb_out = result.metadata.thumb_urls
+        trailer_out = result.metadata.trailer_urls
+        if self._web_client is not None:
+            try:
+                materialized = await materialize_images(
+                    result.metadata.poster_urls,
+                    result.metadata.thumb_urls,
+                    result.metadata.trailer_urls,
+                    self._resource_store,
+                    self._web_client,
+                    self._config,
+                    self._resource_store.data_dir,
+                    extrafanart_urls=result.metadata.extrafanart_urls,
+                )
+                poster_out = materialized.poster_urls
+                thumb_out = materialized.thumb_urls
+                trailer_out = materialized.trailer_urls
+            except Exception:
+                current().warning("image materialization failed, keeping raw urls", number=payload.number)
+
+        await self.report_progress(len(SCALAR_FIELDS) + 1, progress_total, "materialize")
+
+        # 写库并关联 MediaFile. Metadata.actors 仍是展示名; 性别写入 Actor 空位.
+        cast = result.metadata.actors
+        meta = await self._repo.upsert_metadata(
+            number=payload.number,
+            content_type=payload.content_type,
+            actor_genders={item.name: item.gender for item in cast if item.gender != ActorGender.UNKNOWN},
+            title=result.metadata.title,
+            actors=[item.name for item in cast],
+            studio=result.metadata.studio,
+            publisher=result.metadata.publisher,
+            release=result.metadata.release,
+            runtime=result.metadata.runtime,
+            tags=result.metadata.tags,
+            series=result.metadata.series,
+            plot=result.metadata.plot,
+            directors=result.metadata.directors,
+            poster_urls=poster_out,
+            thumb_urls=thumb_out,
+            trailer_urls=trailer_out,
+            extrafanart_urls=result.metadata.extrafanart_urls,
+            scores={s.site: s.score for s in result.metadata.scores},
+            external_ids=result.metadata.external_ids,
+            source_urls=result.metadata.source_urls,
+            field_sources=result.field_sources,
+            raw=result.raw,
+        )
+
+        await finalize_media_file(self._repo, payload.media_file_id, meta.id)
+
+        # 为尚未刮削的演员扇出 ACTOR_SCRAPE.
+        actor_followups = await self._actor_scrape_followups(meta.actors)
+        # 库开启自动整理时为本次刮削的文件扇出 ORGANIZE.
+        organize_followups = await self._auto_organize_followups(payload, file)
+
+        await self.report_progress(progress_total, progress_total, "done")
+
+        current().info(
+            "scrape completed",
+            metadata_id=meta.id,
+            sites_used=len(set(result.field_sources.values())),
+            fields_resolved=len(result.field_sources),
+            failed_sites=result.failed_sites,
+            actor_followups=len(actor_followups),
+            organize_followups=len(organize_followups),
+        )
+
+        assert meta.id is not None
+        return TaskResult(
+            success=True,
+            result=ScrapeResult(
+                metadata_id=meta.id,
+                field_sources=result.field_sources,
+                failed_sites=result.failed_sites,
+                outcomes=current().site_outcomes(),
+            ),
+            followups=[*actor_followups, *organize_followups],
+        )
+
+    def failure_result(self, payload: ScrapePayload) -> ScrapeResult | None:
+        """抓取之后崩掉时, 站点明细仍要能回答"为什么刮不到"."""
+        outcomes = current().site_outcomes(include_unqueried=True)
+        if not outcomes:
+            return None
+        return ScrapeResult(
+            field_sources={},
+            failed_sites=[row.site for row in outcomes if row.outcome is SiteOutcomeKind.FAILED],
+            outcomes=outcomes,
+        )
+
+    async def _auto_organize_followups(self, payload: ScrapePayload, file: MediaFile | None) -> list[FollowupTask]:
+        """库开启自动整理时为本次刮削的那一个文件描述 ORGANIZE 后继.
+
+        范围只有该文件, 且后继只在父成功后创建, 因此整理必然发生在它刮削完成之后.
+        按番号刮削没有可落盘的 `MediaFile` (库因此未知), 不在此列; `media_file_id` 非空但读不到
+        文件或库说明索引与任务不一致, 记 debug 后不链.
+        ``priority=-1``: 不抢占交互提交的任务; 自动整理彼此仍按 FIFO.
+
+        整段 ``except`` 只为不让已写库的刮削任务转为 FAILED; 这一支不可达于任何预期输入, 出现即模型或
+        数据库有问题, 按异常记日志. 此时整理不会发生, 该文件停在「已刮削未落盘」, 与完成事务失败同属不覆盖窗口.
+        """
+        if payload.media_file_id is None:
+            return []
+        if file is None or file.id is None:
+            current().debug("auto organize skipped: media file missing", media_file_id=payload.media_file_id)
+            return []
+        try:
+            library = await self._repo.get_library(file.library_id)
+            if library is None:
+                current().debug("auto organize skipped: library missing", library_id=file.library_id)
+                return []
+            if not library.auto_organize:
+                return []
+            organize = OrganizePayload(library_id=file.library_id, media_file_ids=[file.id])
+            return [
+                FollowupTask(
+                    key=f"organize:{file.id}",
+                    task_type=TaskType.ORGANIZE,
+                    payload=organize.model_dump(mode="json"),
+                    priority=-1,
+                )
+            ]
+        except Exception:
+            current().exception("failed to build auto organize followup", media_file_id=file.id)
+            return []
+
+    async def _actor_scrape_followups(self, actor_names: list[str]) -> list[FollowupTask]:
+        """为尚未刮削的影片演员描述 ACTOR_SCRAPE 后继; 失败不阻断主流程.
+
+        ``meta.actors`` 已是 FacetRule 后的规范名, 与 sync_metadata_facets 创建的 Actor 对应, 缺失名静默跳过.
+        跳过 ``Actor.raw`` 非空者 (站点快照可复用).
+        ``priority=-1``: 批量产生的演员任务不能抢占影片任务.
+        """
+        if not self._config.actor_scraping.auto_scrape or not actor_names:
+            return []
+        try:
+            actors = await self._repo.get_actors_by_names(actor_names)
+            return [
+                FollowupTask(
+                    key=f"actor-scrape:{actor.id}",
+                    task_type=TaskType.ACTOR_SCRAPE,
+                    payload=ActorScrapePayload(actor_id=actor.id).model_dump(mode="json"),
+                    priority=-1,
+                )
+                for actor in actors
+                if actor.id is not None and not actor.raw
+            ]
+        except Exception:
+            current().warning("failed to build actor scrape followups", actors=actor_names)
+            return []
+
+    async def _translate_metadata(self, metadata: AggregatedMetadata, field_language: FieldLanguage) -> None:
+        """就地翻译 ``translate.translate_fields`` 中的文本标量. 单字段失败不影响其余, 全程不抛."""
+        assert self._translator is not None
+        fields = self._config.translate.translate_fields
+        if MetadataField.TITLE in fields and metadata.title:
+            translated = await self._translate_field(metadata.title, field_language, MetadataField.TITLE)
+            if translated:
+                metadata.title = translated
+        if MetadataField.PLOT in fields and metadata.plot:
+            translated = await self._translate_field(metadata.plot, field_language, MetadataField.PLOT)
+            if translated:
+                metadata.plot = translated
+
+    async def _translate_field(self, value: str, field_language: FieldLanguage, field: MetadataField) -> str | None:
+        """翻译单字段; 无目标语言或失败时返回 None."""
+        assert self._translator is not None
+        target = field_language.get(field)
+        if target is None:
+            return None
+        result = await self._translator.translate(value, target)
+        if result:
+            current().debug("field translated", field=str(field), target=str(target))
+        else:
+            current().debug("field not translated", field=str(field), target=str(target))
+        return result

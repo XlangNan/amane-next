@@ -1,0 +1,587 @@
+"""parse_file_info 表测试: 完整路径上的番号、内容类型、分集、字幕、马赛克、分辨率."""
+
+from typing import NamedTuple
+
+import pytest
+
+from amane.parsing import (
+    ContentType,
+    detect_cd,
+    extract_number,
+    infer_content_type,
+    is_amateur,
+    is_uncensored,
+    is_vr,
+    parse_file_info,
+    split_number,
+)
+
+
+class _Case(NamedTuple):
+    path: str
+    cd: int | None = None
+    has_subtitle: bool = False
+    mosaic: str | None = None
+    definition: str | None = None
+    number: str | None = None
+    content_type: ContentType | None = None
+
+
+CASES: list[object] = [
+    # --- 分集 ---
+    _Case("MIDV-123-CD1.mp4", cd=1, number="MIDV-123"),
+    _Case("MIDV-123-cd2.mp4", cd=2, number="MIDV-123"),
+    _Case("MIDV-123-A.mp4", cd=1, number="MIDV-123"),
+    _Case("MIDV-123-B.mp4", cd=2, number="MIDV-123"),
+    _Case("MIDV-123.part2.mp4", cd=2, number="MIDV-123"),
+    _Case("MIDV-123-1.mp4", cd=1, number="MIDV-123"),
+    _Case("MIDV-123-2.mp4", cd=2, number="MIDV-123"),
+    _Case("MIDV-123-3.mp4", cd=3, number="MIDV-123"),
+    _Case("MIDV-123-9.mp4", cd=9, number="MIDV-123"),
+    _Case("MIDV-123.mp4", number="MIDV-123"),
+    _Case("MIDV-123-0.mp4"),
+    _Case("MIDV-123-01.mp4"),
+    _Case("MIDV-123-10.mp4"),
+    _Case("MIDV-123-12.mp4"),
+    # --- 字幕 ---
+    _Case("MIDV-123-C.mp4", has_subtitle=True, number="MIDV-123"),
+    _Case("MIDV-123-UC.mp4", has_subtitle=True, mosaic="cracked", number="MIDV-123"),
+    _Case("[字幕]MIDV-123.mp4", has_subtitle=True, number="MIDV-123"),
+    _Case("[中文字幕]MIDV-123.mp4", has_subtitle=True, number="MIDV-123"),
+    # --- 马赛克: 文件名标记 ---
+    _Case("[無碼]MIDV-123.mp4", mosaic="uncensored", number="MIDV-123"),
+    _Case("[无码]MIDV-123.mp4", mosaic="uncensored", number="MIDV-123"),
+    _Case("[UNCENSORED]ABC-123.mp4", mosaic="uncensored", number="ABC-123"),
+    _Case("ABC-123-uncensored.mp4", mosaic="uncensored", number="ABC-123"),
+    _Case("[破解]MIDV-123.mp4", mosaic="cracked", number="MIDV-123"),
+    _Case("[克破]MIDV-123.mp4", mosaic="cracked", number="MIDV-123"),
+    _Case("[CRACKED]MIDV-123.mp4", mosaic="cracked", number="MIDV-123"),
+    _Case("MIDV-123-cracked.mp4", mosaic="cracked", number="MIDV-123"),
+    _Case("MIDV-123-cracked-C.mp4", has_subtitle=True, mosaic="cracked", number="MIDV-123"),
+    _Case("[流出]MIDV-123.mp4", mosaic="leaked", number="MIDV-123"),
+    _Case("MIDV-123-LEAKED.mp4", mosaic="leaked", number="MIDV-123"),
+    _Case("MIDV-123流出.mp4", mosaic="leaked", number="MIDV-123"),
+    # 同名多标记: 破解优先于流出, 流出优先于无码
+    _Case("MIDV-123-無碼流出.mp4", mosaic="leaked", number="MIDV-123"),
+    _Case("MIDV-123-無碼破解.mp4", mosaic="cracked", number="MIDV-123"),
+    _Case("MIDV-123-破解流出.mp4", mosaic="cracked", number="MIDV-123"),
+    # -U / -UC 是破解; -UC 同时是中字. 后面还可跟分片或分辨率
+    _Case("MIDV-123-UC-CD1.mp4", cd=1, has_subtitle=True, mosaic="cracked", number="MIDV-123"),
+    _Case("MIDV-123-UC-4K.mp4", has_subtitle=True, mosaic="cracked", definition="4K", number="MIDV-123"),
+    _Case("MIDV-123-UC-CD1-4K.mp4", cd=1, has_subtitle=True, mosaic="cracked", definition="4K", number="MIDV-123"),
+    _Case("MIDV-123-U.mp4", mosaic="cracked", number="MIDV-123"),
+    _Case("MIDV-123-C-U.mp4", has_subtitle=True, mosaic="cracked", number="MIDV-123"),
+    _Case("MIDV-123-U-CD1.mp4", cd=1, mosaic="cracked", number="MIDV-123"),
+    _Case("HEYZO-123.mp4", number="HEYZO-123"),
+    _Case("HEYZO-123-1080p.mp4", definition="1080p", number="HEYZO-123"),
+    _Case("HEYZO-123-流出.mp4", mosaic="leaked", number="HEYZO-123"),
+    _Case("HEYZO-123-U.mp4", mosaic="cracked", number="HEYZO-123"),
+    # --- 分辨率: 点号 / 连字符 ---
+    _Case("ABC-123.8K.mp4", definition="8K", number="ABC-123"),
+    _Case("ABC-123-4K.mp4", definition="4K", number="ABC-123"),
+    _Case("ABC-123.2160p.mp4", definition="4K", number="ABC-123"),
+    _Case("ABC-123.2160P.mp4", definition="4K", number="ABC-123"),
+    _Case("ABC-123.1440p.mp4", definition="1440p", number="ABC-123"),
+    _Case("ABC-123.1080p.mp4", definition="1080p", number="ABC-123"),
+    _Case("ABC-123-720p.mp4", definition="720p", number="ABC-123"),
+    _Case("ABC-123.480p.mp4", definition="480p", number="ABC-123"),
+    _Case("ABC-123.HD.mp4", definition="HD", number="ABC-123"),
+    _Case("ABC-123.SD.mp4", definition="SD", number="ABC-123"),
+    # 多命中取最高
+    _Case("ABC-123.1080p.HD.mp4", definition="1080p", number="ABC-123"),
+    _Case("ABC-123.4K.2160p.mp4", definition="4K", number="ABC-123"),
+    _Case("ABC-123.8K.HD.mp4", definition="8K", number="ABC-123"),
+    _Case("ABC-123.720p.1080p.mp4", definition="1080p", number="ABC-123"),
+    # 下划线分隔 (番号剥离已把 _ 当标记分隔符)
+    _Case("MIDV-123_4K.mp4", definition="4K", number="MIDV-123"),
+    _Case("MIDV-123_4K_无码.mp4", mosaic="uncensored", definition="4K", number="MIDV-123"),
+    _Case("MIDV-123_1080p_x.mp4", definition="1080p", number="MIDV-123"),
+    _Case("ABC-123_8K_HDR.mp4", definition="8K", number="ABC-123"),
+    # 方括号 / 汉字紧贴
+    _Case("[4K]MIDV-123.mp4", definition="4K", number="MIDV-123"),
+    _Case("[4K無碼]MIDV-123.mp4", mosaic="uncensored", definition="4K", number="MIDV-123"),
+    _Case("[1080p無碼]MIDV-123.mp4", mosaic="uncensored", definition="1080p", number="MIDV-123"),
+    _Case("MIDV-123-4K無碼.mp4", mosaic="uncensored", definition="4K", number="MIDV-123"),
+    _Case("MIDV-123-4K-無碼.mp4", mosaic="uncensored", definition="4K", number="MIDV-123"),
+    _Case("[破解]MIDV-123_1080p.mp4", mosaic="cracked", definition="1080p", number="MIDV-123"),
+    # 空格分隔
+    _Case("ABC-123 4K.mp4", definition="4K", number="ABC-123"),
+    _Case("ABC-123 1080p uncensored.mp4", mosaic="uncensored", definition="1080p", number="ABC-123"),
+    # 帧率后缀仍识别分辨率
+    _Case("ABC-123.1080p60.mp4", definition="1080p", number="ABC-123"),
+    _Case("ABC-123.2160p30.mp4", definition="4K", number="ABC-123"),
+    # 分辨率数字不得被番号规则吸走: 无短横线的日期号 + 分辨率
+    _Case("120115_318-mura-1080p.mp4", definition="1080p", number="120115_318"),
+    _Case("120115_318-mura-720p.mp4", definition="720p", number="120115_318"),
+    _Case("120115_318-mura-2160p.mp4", definition="4K", number="120115_318"),
+    _Case("120115_318-mura-1440p.mp4", definition="1440p", number="120115_318"),
+    _Case("120115_318-mura-480p.mp4", definition="480p", number="120115_318"),
+    _Case("112912_776-mura-whole1_hd.wmv", definition="HD", number="112912_776"),
+    # 分集 + 分辨率
+    _Case("MIDV-123-4K-CD1.mp4", cd=1, definition="4K", number="MIDV-123"),
+    # --- 分辨率误报: 番号/编码里的字母数字不当作独立标记 ---
+    _Case("SKYHD-172.mp4", number="SKYHD-172"),
+    _Case("ABC-123.HDTV.mp4", number="ABC-123"),
+    _Case("ABC-123.4KS.mp4", number="ABC-123"),
+    _Case("ABC-2160.mp4"),
+    _Case("ABC-123.1080.mp4", number="ABC-123"),
+    # 带 p 的分辨率片段整段剥除, 数字不并入番号
+    _Case("ABC-2160p.mp4", definition="4K", number="ABC"),
+    _Case("natsume-1080p.mp4", definition="1080p", number="NATSUME"),
+    _Case("ABC-123.mp4", number="ABC-123"),
+    _Case("HD-123.mp4"),
+    _Case("SD-123.mp4"),
+    _Case("HD_123.mp4"),
+    _Case("SD_123.mp4"),
+    _Case("ABC-123.FHD.mp4", number="ABC-123"),
+    _Case("ABC-123.UHD.mp4", number="ABC-123"),
+    # 字幕反例: -CD / -CS 不是 -C
+    _Case("MIDV-123-CS.mp4", number="MIDV-123"),
+    # --- 完整路径: 目录关键词决定内容类型 ---
+    _Case("/media/里番/something-123.mp4", content_type=ContentType.HENTAI),
+    _Case("/media/裏番/something-123.mp4", content_type=ContentType.HENTAI),
+    _Case("/media/getchu/item-123.mp4", content_type=ContentType.HENTAI),
+    _Case("/media/GETCHU/item-123.mp4", content_type=ContentType.HENTAI),
+    _Case("/media/欧美/MIDV-123.mp4", number="MIDV-123", content_type=ContentType.WESTERN),
+    _Case("/mnt/nas/library/欧美/2024/studio/MIDV-123.mp4", number="MIDV-123", content_type=ContentType.WESTERN),
+    # 东欧美 不含「欧美」单独命中
+    _Case("/media/东欧美/MIDV-123.mp4", number="MIDV-123", content_type=ContentType.CENSORED),
+    # getchu 必须整段相等; 子串不分类
+    _Case("/media/forgetchu/MIDV-123.mp4", number="MIDV-123", content_type=ContentType.CENSORED),
+    _Case("/media/getchu-docs/MIDV-123.mp4", number="MIDV-123", content_type=ContentType.CENSORED),
+    _Case("/media/my-getchu/MIDV-123.mp4", number="MIDV-123", content_type=ContentType.CENSORED),
+    # 里番/欧美须在段首; 嵌在其它词里不算
+    _Case("/media/里番合集/something-123.mp4", content_type=ContentType.HENTAI),
+    _Case("/media/欧美片商/MIDV-123.mp4", number="MIDV-123", content_type=ContentType.WESTERN),
+    _Case("/media/非欧美/MIDV-123.mp4", number="MIDV-123", content_type=ContentType.CENSORED),
+    _Case("/media/这里番号/MIDV-123.mp4", number="MIDV-123", content_type=ContentType.CENSORED),
+    # 路径关键词优先于番号分类
+    _Case("/media/欧美/HEYZO-123.mp4", number="HEYZO-123", content_type=ContentType.WESTERN),
+    _Case("/media/里番/MIDV-123.mp4", number="MIDV-123", content_type=ContentType.HENTAI),
+    # 无路径关键词: 按番号
+    _Case("/media/MIDV-123.mp4", number="MIDV-123", content_type=ContentType.CENSORED),
+    _Case("/media/SSIS-456.mp4", number="SSIS-456", content_type=ContentType.CENSORED),
+    _Case("/media/FC2-PPV-1234567.mp4", number="FC2-1234567", content_type=ContentType.FC2),
+    _Case("/media/FC2PPV1234567.mp4", number="FC2-1234567", content_type=ContentType.FC2),
+    _Case("/media/HEYZO-1234.mp4", number="HEYZO-1234", content_type=ContentType.UNCENSORED),
+    _Case("/media/H4610-ki221218.mp4", number="H4610-KI221218", content_type=ContentType.UNCENSORED),
+    _Case("/media/S2MBD-006.mp4", number="S2MBD-006", content_type=ContentType.UNCENSORED),
+    _Case("/media/SMBD-005.mp4", number="SMBD-005", content_type=ContentType.UNCENSORED),
+    _Case("/media/gachig256.mp4", number="GACHIG-256", content_type=ContentType.UNCENSORED),
+    _Case("/media/DRGBD-045.mp4", number="DRGBD-045", content_type=ContentType.UNCENSORED),
+    _Case("/media/SMDV-028.mp4", number="SMDV-028", content_type=ContentType.UNCENSORED),
+    _Case("/media/MD0165-1.mp4", cd=1, number="MD0165-1", content_type=ContentType.CHINESE),
+    _Case("/media/259LUXU-1456.mp4", number="259LUXU-1456", content_type=ContentType.AMATEUR),
+    _Case("/media/SIRO-4567.mp4", number="SIRO-4567", content_type=ContentType.AMATEUR),
+    _Case("/media/T38-068.mp4", number="T38-068", content_type=ContentType.CENSORED),
+    _Case("/media/T3800068.mp4", number="T38-068", content_type=ContentType.CENSORED),
+    _Case("/media/T29-001.mp4", number="T29-001", content_type=ContentType.CENSORED),
+    _Case("/media/T38-068-CD1.mp4", cd=1, number="T38-068", content_type=ContentType.CENSORED),
+    _Case("/media/T38-068/video.mp4", number="T38-068", content_type=ContentType.CENSORED),
+    # --- 前缀内含数字: 番号按整段提取, 类型查表 ---
+    _Case("/media/R18-292.mp4", number="R18-292", content_type=ContentType.CENSORED),
+    _Case("/media/R18-292-CD1.mp4", cd=1, number="R18-292", content_type=ContentType.CENSORED),
+    _Case("/media/[4K]R18-292.mp4", definition="4K", number="R18-292", content_type=ContentType.CENSORED),
+    _Case("/media/C0930-ki220519.mp4", number="C0930-KI220519", content_type=ContentType.UNCENSORED),
+    _Case("/media/H0930-ki190101.mp4", number="H0930-KI190101", content_type=ContentType.UNCENSORED),
+    _Case("/media/MCB3D-012.mp4", number="MCB3D-012", content_type=ContentType.UNCENSORED),
+    # 纯数字后缀非站内写法 (该族后缀带字母段): 整段保留, 类型仍按无码前缀表
+    _Case("/media/H4610-123.mp4", number="H4610-123", content_type=ContentType.UNCENSORED),
+    # 单段 TH101 与短 FC2 同样非站内写法: 整段保留, 类型不从形态推断
+    _Case("/media/TH101-123.mp4", number="TH101-123", content_type=ContentType.WESTERN),
+    _Case("/media/FC2-123.mp4", number="FC2-123", content_type=ContentType.WESTERN),
+    _Case("/media/010115-001.mp4", number="010115-001", content_type=ContentType.UNCENSORED),
+    _Case("/media/010115_001.mp4", number="010115_001", content_type=ContentType.UNCENSORED),
+    _Case("/media/010115_01.mp4", number="010115_01", content_type=ContentType.UNCENSORED),
+    _Case("/media/010115-001/video.mp4", number="010115-001", content_type=ContentType.UNCENSORED),
+    _Case("/media/38-068.mp4", number="38-068", content_type=ContentType.WESTERN),
+    _Case("/media/欧美/T38-068.mp4", number="T38-068", content_type=ContentType.WESTERN),
+    _Case("/media/欧美/010115-001.mp4", number="010115-001", content_type=ContentType.WESTERN),
+    _Case("/media/SSNI00321.mp4", number="SSNI-321", content_type=ContentType.CENSORED),
+    _Case("/media/Mywife No.1234.mp4", number="Mywife No.1234", content_type=ContentType.CENSORED),
+    _Case("/media/Vixen.23.04.15.mp4", content_type=ContentType.WESTERN),
+    # --- 完整路径: 马赛克可从目录名整段补; 分辨率仍只看文件名 ---
+    _Case(
+        "/media/uncensored/4K/MIDV-123.mp4",
+        mosaic="uncensored",
+        number="MIDV-123",
+        content_type=ContentType.CENSORED,
+    ),
+    _Case(
+        "/media/cracked/1080p/ABC-123.mp4",
+        mosaic="cracked",
+        number="ABC-123",
+        content_type=ContentType.CENSORED,
+    ),
+    _Case("/library/censored/HD/MIDV-123.mp4", number="MIDV-123", content_type=ContentType.CENSORED),
+    _Case("/media/Uncensored/MIDV-123.mp4", mosaic="uncensored", number="MIDV-123"),
+    _Case("/media/无码/MIDV-123.mp4", mosaic="uncensored", number="MIDV-123"),
+    _Case("/media/無碼/MIDV-123.mp4", mosaic="uncensored", number="MIDV-123"),
+    _Case("/media/LEAKED/MIDV-123.mp4", mosaic="leaked", number="MIDV-123"),
+    _Case("/media/破解/MIDV-123.mp4", mosaic="cracked", number="MIDV-123"),
+    _Case("/media/流出/MIDV-123.mp4", mosaic="leaked", number="MIDV-123"),
+    _Case("/media/[无码]/MIDV-123.mp4", mosaic="uncensored", number="MIDV-123"),
+    _Case("/media/【破解】/MIDV-123.mp4", mosaic="cracked", number="MIDV-123"),
+    # 文件名优先于目录
+    _Case("/media/cracked/MIDV-123-无码.mp4", mosaic="uncensored", number="MIDV-123"),
+    _Case("/media/uncensored/MIDV-123-LEAKED.mp4", mosaic="leaked", number="MIDV-123"),
+    # 近目录优先
+    _Case("/media/uncensored/流出/MIDV-123.mp4", mosaic="leaked", number="MIDV-123"),
+    _Case("/media/流出/uncensored/MIDV-123.mp4", mosaic="uncensored", number="MIDV-123"),
+    # 马赛克目录反例: 子串 / 复合名 / 非词表 / -UC 当目录
+    _Case("/media/uncensored-guide/MIDV-123.mp4", number="MIDV-123"),
+    _Case("/media/JAV-uncensored/MIDV-123.mp4", number="MIDV-123"),
+    _Case("/media/leaked-info/MIDV-123.mp4", number="MIDV-123"),
+    _Case("/media/无码破解/MIDV-123.mp4", number="MIDV-123"),
+    _Case("/media/流出物/MIDV-123.mp4", number="MIDV-123"),
+    _Case("/media/UC/MIDV-123.mp4", number="MIDV-123"),
+    _Case("/media/documentation/MIDV-123.mp4", number="MIDV-123"),
+    # 分辨率不从目录读 (盘符/分类夹)
+    _Case("/media/4K/MIDV-123.mp4", number="MIDV-123"),
+    _Case("/media/1080p/MIDV-123.mp4", number="MIDV-123"),
+    _Case("/media/HD/MIDV-123.mp4", number="MIDV-123"),
+    _Case("/Volumes/4K/JAV/MIDV-123.mp4", number="MIDV-123"),
+    _Case("/media/720p/ABC-123.mp4", number="ABC-123"),
+    # 字幕不从目录读 (中文路径尤其不能用字符类)
+    _Case("/media/字幕/MIDV-123.mp4", number="MIDV-123"),
+    _Case("/media/中文字幕/MIDV-123.mp4", number="MIDV-123"),
+    _Case("/media/中文/MIDV-123.mp4", number="MIDV-123"),
+    _Case("/media/字幕/MIDV-123-C.mp4", has_subtitle=True, number="MIDV-123"),
+    # --- 完整路径: 番号从父目录回退; 文件名已命中则不管目录 ---
+    _Case("/media/MIDV-123/video.mp4", number="MIDV-123", content_type=ContentType.CENSORED),
+    _Case("/media/SSIS-456/MIDV-123.mp4", number="MIDV-123", content_type=ContentType.CENSORED),
+    _Case("/media/FC2-1234567/movie.mkv", number="FC2-1234567", content_type=ContentType.FC2),
+    _Case("/media/HEYZO-1234/clip.mp4", number="HEYZO-1234", content_type=ContentType.UNCENSORED),
+    _Case("/media/MIDV-123-uncensored/video.mp4", number="MIDV-123"),
+    _Case("/media/Studio Name/video.mp4", number="VIDEO", content_type=ContentType.WESTERN),
+    _Case("/media/downloads/video.mp4", number="VIDEO", content_type=ContentType.WESTERN),
+    _Case("/media/Season02/video.mp4", number="VIDEO", content_type=ContentType.WESTERN),
+    _Case("/media/2024-01/video.mp4", number="VIDEO", content_type=ContentType.WESTERN),
+    _Case("/media/HDR10/video.mp4", number="VIDEO", content_type=ContentType.WESTERN),
+    _Case("/media/DISC01/video.mp4", number="VIDEO", content_type=ContentType.WESTERN),
+    _Case("/media/Vol.12/video.mp4", number="VIDEO", content_type=ContentType.WESTERN),
+    _Case("/media/FC2-1111111/MIDV-123/video.mp4", number="MIDV-123"),
+    _Case("/media/n1234/clip.mp4", number="n1234", content_type=ContentType.UNCENSORED),
+    _Case("/media/k1363/clip.mp4", number="k1363", content_type=ContentType.UNCENSORED),
+    # k 系要求字母前不是字母: MK1234 仍是普通有码番号
+    _Case("/media/MK1234.mp4", number="MK-1234", content_type=ContentType.CENSORED),
+    # --- 完整路径: 分集只认直接父目录 CDn/PARTn ---
+    _Case("/media/MIDV-123/CD1/video.mp4", cd=1, number="MIDV-123"),
+    _Case("/media/MIDV-123/PART2/video.mp4", cd=2, number="MIDV-123"),
+    _Case("/media/cd2/MIDV-123.mp4", cd=2, number="MIDV-123"),
+    _Case("/media/CD10/MIDV-123.mp4", cd=10, number="MIDV-123"),
+    _Case("/media/CD01/MIDV-123.mp4", cd=1, number="MIDV-123"),
+    _Case("/media/CD1/MIDV-123-CD2.mp4", cd=2, number="MIDV-123"),
+    # 分集目录反例: 祖先 / 连字符 / 盘名 / -A / 裸数字 / CD0
+    _Case("/media/CD1/other/MIDV-123.mp4", number="MIDV-123"),
+    _Case("/media/CD-1/MIDV-123.mp4", number="MIDV-123"),
+    _Case("/media/disc1/MIDV-123.mp4", number="MIDV-123"),
+    _Case("/media/A/MIDV-123.mp4", number="MIDV-123"),
+    _Case("/media/1/MIDV-123.mp4", number="MIDV-123"),
+    _Case("/media/CD0/MIDV-123.mp4", number="MIDV-123"),
+    _Case("/media/CDs/MIDV-123.mp4", number="MIDV-123"),
+    # --- 完整路径: 目录关键词与文件名标记同时出现 ---
+    _Case(
+        "/incoming/batch/[無碼]MIDV-123-4K.mp4",
+        mosaic="uncensored",
+        definition="4K",
+        number="MIDV-123",
+        content_type=ContentType.CENSORED,
+    ),
+    _Case(
+        "/media/欧美/MIDV-123-4K-無碼.mp4",
+        mosaic="uncensored",
+        definition="4K",
+        number="MIDV-123",
+        content_type=ContentType.WESTERN,
+    ),
+    _Case("/media/里番/foo-123-CD2.mp4", cd=2, content_type=ContentType.HENTAI),
+    _Case(
+        "/vol/data/library/sub/[破解]MIDV-123.1080p.mp4",
+        mosaic="cracked",
+        definition="1080p",
+        number="MIDV-123",
+        content_type=ContentType.CENSORED,
+    ),
+    _Case(
+        "/media/videos/StudioX/MIDV-123-CD1.mp4",
+        cd=1,
+        number="MIDV-123",
+        content_type=ContentType.CENSORED,
+    ),
+    _Case("/media/SSIS-456 CD2.mp4", number="SSIS-456", content_type=ContentType.CENSORED),
+    _Case("/media/[HD]SSIS-456.mp4", definition="HD", number="SSIS-456", content_type=ContentType.CENSORED),
+    _Case(
+        "/media/videos/MIDV-123-UC.mp4",
+        has_subtitle=True,
+        mosaic="cracked",
+        number="MIDV-123",
+        content_type=ContentType.CENSORED,
+    ),
+    _Case(
+        "/media/欧美/ABC-123.1080p.mp4",
+        definition="1080p",
+        number="ABC-123",
+        content_type=ContentType.WESTERN,
+    ),
+    _Case(
+        "/media/lib/MIDV-123-UC-CD1.mp4",
+        cd=1,
+        has_subtitle=True,
+        mosaic="cracked",
+        number="MIDV-123",
+        content_type=ContentType.CENSORED,
+    ),
+    _Case(
+        "/incoming/MIDV-123_4K_无码.mp4",
+        mosaic="uncensored",
+        definition="4K",
+        number="MIDV-123",
+        content_type=ContentType.CENSORED,
+    ),
+]
+
+
+@pytest.mark.parametrize("case", CASES, ids=lambda c: c.path)
+def test_parse_file_info(case: _Case) -> None:
+    info = parse_file_info(case.path)
+    assert info.cd == case.cd
+    assert info.has_subtitle is case.has_subtitle
+    assert info.mosaic == case.mosaic
+    assert info.definition == case.definition
+    if case.number is not None:
+        assert info.number == case.number
+    if case.content_type is not None:
+        assert info.content_type == case.content_type
+
+
+# --- 无路径: 同一 parse_file_info 的字段包装 ---
+
+PREFIX_SUFFIX_CASES: list[tuple[str, str, str]] = [
+    ("MIDV-123", "MIDV", "123"),
+    ("ABS-001", "ABS", "001"),
+    ("T28-123", "T28", "123"),
+    ("T38-068", "T38", "068"),
+    ("FC2-1234567", "FC2", "1234567"),
+    ("HEYZO-1234", "HEYZO", "1234"),
+    ("vixen.23.04.15", "VIXEN", "23.04.15"),
+    ("MKY-HS-001", "MKY-HS", "001"),
+    ("H4610-ki123456", "H4610", "ki123456"),
+    ("R18-292", "R18", "292"),
+    ("C0930-ki220519", "C0930", "ki220519"),
+    # 识别不出番号: 前缀与剩余段都是空串
+    ("", "", ""),
+    ("12345", "", ""),
+    ("HELLO", "", ""),
+    ("MIDV", "", ""),
+    ("A-1", "", ""),
+    ("AA-1", "", ""),
+    ("東京-123", "", ""),
+    ("---", "", ""),
+]
+
+
+@pytest.mark.parametrize(("number", "prefix", "suffix"), PREFIX_SUFFIX_CASES)
+def test_split_number(number: str, prefix: str, suffix: str) -> None:
+    assert split_number(number) == (prefix, suffix)
+
+
+INFER_CONTENT_TYPE_CASES: list[tuple[str, str | None, ContentType]] = [
+    ("MIDV-123", None, ContentType.CENSORED),
+    ("SSIS-456", None, ContentType.CENSORED),
+    ("MDVR-0123", None, ContentType.CENSORED),
+    ("SSNI00321", None, ContentType.CENSORED),
+    ("Mywife No.1234", None, ContentType.CENSORED),
+    ("T28-123", None, ContentType.CENSORED),
+    ("T38-068", None, ContentType.CENSORED),
+    ("T3800068", None, ContentType.CENSORED),
+    ("T29-001", None, ContentType.CENSORED),
+    ("R18-292", None, ContentType.CENSORED),
+    ("R18-315", None, ContentType.CENSORED),
+    ("H4610-123", None, ContentType.UNCENSORED),
+    ("C0930-ki220519", None, ContentType.UNCENSORED),
+    ("H0930-ki190101", None, ContentType.UNCENSORED),
+    ("MCB3D-012", None, ContentType.UNCENSORED),
+    ("FC2-123", None, ContentType.WESTERN),
+    ("010115-001", None, ContentType.UNCENSORED),
+    ("010115_001", None, ContentType.UNCENSORED),
+    ("38-068", None, ContentType.WESTERN),
+    ("KIN8-123", None, ContentType.WESTERN),
+    ("TH101-123-12345", None, ContentType.UNCENSORED),
+    ("FC2-PPV-1234567", None, ContentType.FC2),
+    ("vixen.23.04.15", None, ContentType.WESTERN),
+    ("HEYZO-1234", None, ContentType.UNCENSORED),
+    ("CWP-123", None, ContentType.UNCENSORED),
+    ("n1234", None, ContentType.UNCENSORED),
+    ("k1363", None, ContentType.UNCENSORED),
+    ("SIRO-4567", None, ContentType.AMATEUR),
+    ("259LUXU-1456", None, ContentType.AMATEUR),
+    ("MD-0123", None, ContentType.CHINESE),
+    ("MD0165-1", None, ContentType.CHINESE),
+    ("MKY-NS-012", None, ContentType.CHINESE),
+    ("VIDEO", None, ContentType.WESTERN),
+    ("Weekly Update", None, ContentType.WESTERN),
+    ("just a movie title", None, ContentType.WESTERN),
+    ("MIDV-123", "/media/欧美/MIDV-123.mp4", ContentType.WESTERN),
+    ("MIDV-123", "/media/MIDV-123.mp4", ContentType.CENSORED),
+]
+
+
+@pytest.mark.parametrize(("number", "file_path", "expected"), INFER_CONTENT_TYPE_CASES)
+def test_infer_content_type(number: str, file_path: str | None, expected: ContentType) -> None:
+    assert infer_content_type(number, file_path) == expected
+
+
+UNCENSORED_CASES: list[tuple[str, bool]] = [
+    ("HEYZO-1234", True),
+    ("010115-001", True),
+    ("010115_001", True),
+    ("T38-068", False),
+    ("38-068", False),
+    ("S2M-001", True),
+    ("C0930-ki220519", True),
+    ("H0930-ki190101", True),
+    ("H4610-123", True),
+    ("MCB3D-012", True),
+    ("CWP-123", True),
+    ("n1234", True),
+    ("k1363", True),
+    ("BT-123", True),
+    ("SKY-001", True),
+    ("XXX-AV-12345", True),
+    ("MKBD-S120", True),
+    ("DRG-123", True),
+    ("DRGBD-045", True),
+    ("SMDV-028", True),
+    ("vixen.23.04.15", False),
+    ("MIDV-123", False),
+    ("SSIS-456", False),
+    ("ABP-789", False),
+    ("IPX-001", False),
+    ("FC2-1234567", False),
+]
+
+
+@pytest.mark.parametrize(("number", "expected"), UNCENSORED_CASES)
+def test_is_uncensored(number: str, expected: bool) -> None:
+    assert is_uncensored(number) is expected
+
+
+AMATEUR_CASES: list[tuple[str, bool]] = [
+    ("SIRO-1234", True),
+    ("LUXU-1234", True),
+    ("259LUXU-1456", True),
+    ("ARA-423", True),
+    ("MIDV-123", False),
+]
+
+
+@pytest.mark.parametrize(("number", "expected"), AMATEUR_CASES)
+def test_is_amateur(number: str, expected: bool) -> None:
+    assert is_amateur(number) is expected
+
+
+EXTRACT_NUMBER_CASES: list[tuple[str, str | None]] = [
+    ("[4K] MIDV-123 标题", "MIDV-123"),
+    ("SSIS-456 FHD", "SSIS-456"),
+    ("FC2-PPV-1234567 新作", "FC2-1234567"),
+    ("HEYZO-1234", "HEYZO-1234"),
+    ("T38-068 新作", "T38-068"),
+    ("[4K] R18-292 妹の爆乳は一見にしかず", "R18-292"),
+    ("[4K] T38-068 标题", "T38-068"),
+    ("010115-001", "010115-001"),
+    ("010115_001", "010115_001"),
+    ("259LUXU-1456", "259LUXU-1456"),
+    # 站内写法带数字段而文件名常省略, 按标签补齐; 标签须从番号开头起算 (GARA 不含 ARA)
+    ("MIUM-1000", "300MIUM-1000"),
+    ("ARA-423", "261ARA-423"),
+    ("261ARA-423", "261ARA-423"),
+    ("GARA-006", "GARA-006"),
+    ("今週の新作をお届けします", None),
+    ("Weekly Update", None),
+    ("", None),
+    ("FC2 配信開始", None),
+    ("just a movie title", None),
+]
+
+
+@pytest.mark.parametrize(("text", "expected"), EXTRACT_NUMBER_CASES)
+def test_extract_number(text: str, expected: str | None) -> None:
+    assert extract_number(text) == expected
+
+
+EXTRACT_VS_PATH_CASES: list[tuple[str, str]] = [
+    ("just a movie title", "just a movie title.mp4"),
+]
+
+
+@pytest.mark.parametrize(("text", "path"), EXTRACT_VS_PATH_CASES)
+def test_extract_number_skips_filename_fallback(text: str, path: str) -> None:
+    assert extract_number(text) is None
+    assert parse_file_info(path).number
+
+
+DETECT_CD_CASES: list[tuple[str, int | None]] = [
+    ("MIDV-123-CD2.srt", 2),
+    ("MIDV-123-PART2.ass", 2),
+    ("MIDV-123-1.srt", 1),
+    ("MIDV-123.srt", None),
+    ("/media/CD2/MIDV-123.srt", None),
+]
+
+
+@pytest.mark.parametrize(("filename", "expected"), DETECT_CD_CASES)
+def test_detect_cd(filename: str, expected: int | None) -> None:
+    assert detect_cd(filename) == expected
+
+
+ESCAPE_STRING_CASES: list[tuple[str, list[str], str]] = [
+    ("/media/MIDV-123-4K.mp4", ["something"], "MIDV-123"),
+]
+
+
+@pytest.mark.parametrize(("path", "extra", "number"), ESCAPE_STRING_CASES)
+def test_parse_file_info_escape_strings(path: str, extra: list[str], number: str) -> None:
+    assert parse_file_info(path, escape_strings=extra).number == number
+
+
+MOSAIC_CANONICAL_ROUNDTRIP: list[tuple[str, str]] = [
+    ("MIDV-123-U.mp4", "cracked"),
+    ("MIDV-123-無碼.mp4", "uncensored"),
+    ("MIDV-123-流出.mp4", "leaked"),
+]
+
+
+@pytest.mark.parametrize(("source", "canonical"), MOSAIC_CANONICAL_ROUNDTRIP)
+def test_mosaic_canonical_filename_roundtrip(source: str, canonical: str) -> None:
+    info = parse_file_info(source)
+    assert info.mosaic == canonical
+    again = parse_file_info(f"MIDV-123-{canonical}.mp4")
+    assert again.mosaic == canonical
+
+
+VR_CASES: list[tuple[list[str], bool]] = [
+    ([], False),
+    (["単体作品", "ハイビジョン", "中出し"], False),
+    (["VR"], True),
+    (["vr"], True),
+    (["  VR専用  "], True),
+    (["8KVR"], True),
+    (["ハイクオリティVR"], True),
+    (["VR作品"], True),
+    (["VR専用作品"], True),
+    (["単体作品", "vr専用"], True),
+    # 含 VR 字样的其它标签不命中
+    (["VRっぽい"], False),
+    (["8K VR"], False),
+    (["ハイクオリティ VR"], False),
+    (["ＶＲ"], False),
+    # 番号不参与判定: 厂商前缀里的 VR 与含 VR 的非 VR 番号都无法区分
+    (["MDVR-123"], False),
+    (["SVR-123"], False),
+]
+
+
+@pytest.mark.parametrize(("tags", "expected"), VR_CASES)
+def test_is_vr(tags: list[str], expected: bool) -> None:
+    assert is_vr(tags) is expected

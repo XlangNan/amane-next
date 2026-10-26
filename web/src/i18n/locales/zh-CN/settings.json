@@ -1,0 +1,820 @@
+{
+  "title": "设置",
+  "tabs": {
+    "scraping": "影片刮削",
+    "actor_scraping": "演员刮削",
+    "network": "网络",
+    "worker": "任务引擎",
+    "watcher": "文件监控",
+    "logging": "日志",
+    "sr": "图像超分",
+    "watermark": "水印",
+    "notify": "通知",
+    "emby": "Emby",
+    "translate": "翻译"
+  },
+  "config": {
+    "loadError": "加载配置失败"
+  },
+  "client": {
+    "title": "客户端设置",
+    "unavailable": "此页面只在 Android APP 内可用",
+    "bridgeMissing": "APP 未响应页面请求, 请重新安装或更新",
+    "server": "当前服务器",
+    "switchServer": "切换服务器",
+    "webView": "系统 WebView",
+    "chromium": "Chromium 版本",
+    "webViewUnknown": "未知",
+    "chromiumOutdated": "Chromium {{major}} 低于前端需要的 {{min}}. 请更新系统 WebView, 否则布局与样式会残缺",
+    "updateWebView": "打开 WebView 的商店页",
+    "appVersion": "APP 版本",
+    "exitApp": "退出 APP"
+  },
+  "fields": {
+    "scraping": {
+      "download_resources": {
+        "label": "刮削时下载",
+        "description": "封面/海报/剧照即使不设置也会在访问对应影片详情页时下载",
+        "options": {
+          "thumb": "封面",
+          "poster": "海报",
+          "extrafanart": "剧照",
+          "trailer": "预告片"
+        },
+        "$": {
+          "options": {
+            "thumb": "封面",
+            "poster": "海报",
+            "extrafanart": "剧照",
+            "trailer": "预告片"
+          }
+        }
+      },
+      "crop_poster": {
+        "label": "裁切海报",
+        "description": "从封面自动裁切生成海报"
+      },
+      "poster_crop_skip_ratio": {
+        "label": "海报裁切跳过阈值比例",
+        "description": "已有海报与封面高度之比超过此值则不裁切"
+      },
+      "poster_ratio": {
+        "label": "海报裁切比例",
+        "description": "从封面裁切海报的宽高比"
+      },
+      "jpeg_quality": {
+        "label": "JPEG 质量",
+        "description": "图片保存质量 (1-100), 越高文件越大"
+      },
+      "field_priority": {
+        "label": "字段优先级",
+        "description": "单独设定特定字段的优先级, 类型路由中的其他站点仍会请求",
+        "options": {
+          "title": "标题",
+          "actors": "演员",
+          "tags": "标签",
+          "release": "发行日期",
+          "runtime": "时长",
+          "directors": "导演",
+          "series": "系列",
+          "studio": "制作商",
+          "publisher": "发行商",
+          "plot": "剧情",
+          "poster_urls": "海报",
+          "thumb_urls": "封面",
+          "trailer_urls": "预告片",
+          "extrafanart": "剧照",
+          "score": "评分"
+        },
+        "$": {
+          "options": {
+            "airav": "airav",
+            "avbase": "avbase",
+            "avsox": "avsox",
+            "dahlia": "dahlia",
+            "dmm": "dmm",
+            "faleno": "faleno",
+            "fc2": "fc2",
+            "fc2club": "fc2club",
+            "fc2ppvdb": "fc2ppvdb",
+            "freejavbt": "freejavbt",
+            "getchu": "getchu",
+            "gfriends": "gfriends",
+            "giga": "giga",
+            "iqqtv": "iqqtv",
+            "jav321": "jav321",
+            "javbus": "javbus",
+            "javdb": "javdb",
+            "javlibrary": "javlibrary",
+            "kin8": "kin8",
+            "mgstage": "mgstage",
+            "minnano": "minnano",
+            "official": "official",
+            "prestige": "prestige",
+            "r18dev": "r18dev",
+            "theporndb": "theporndb",
+            "wikipedia": "wikipedia",
+            "xcity": "xcity"
+          },
+          "$": {
+            "options": {
+              "airav": "airav",
+              "avbase": "avbase",
+              "avsox": "avsox",
+              "dahlia": "dahlia",
+              "dmm": "dmm",
+              "faleno": "faleno",
+              "fc2": "fc2",
+              "fc2club": "fc2club",
+              "fc2ppvdb": "fc2ppvdb",
+              "freejavbt": "freejavbt",
+              "getchu": "getchu",
+              "gfriends": "gfriends",
+              "giga": "giga",
+              "iqqtv": "iqqtv",
+              "jav321": "jav321",
+              "javbus": "javbus",
+              "javdb": "javdb",
+              "javlibrary": "javlibrary",
+              "kin8": "kin8",
+              "mgstage": "mgstage",
+              "minnano": "minnano",
+              "official": "official",
+              "prestige": "prestige",
+              "r18dev": "r18dev",
+              "theporndb": "theporndb",
+              "wikipedia": "wikipedia",
+              "xcity": "xcity"
+            }
+          }
+        }
+      },
+      "field_blacklist": {
+        "label": "字段排除",
+        "description": "指定字段不采用的站点",
+        "options": {
+          "title": "标题",
+          "actors": "演员",
+          "tags": "标签",
+          "release": "发行日期",
+          "runtime": "时长",
+          "directors": "导演",
+          "series": "系列",
+          "studio": "制作商",
+          "publisher": "发行商",
+          "plot": "剧情",
+          "poster_urls": "海报",
+          "thumb_urls": "封面",
+          "trailer_urls": "预告片",
+          "extrafanart": "剧照",
+          "score": "评分"
+        },
+        "$": {
+          "options": {
+            "airav": "airav",
+            "avbase": "avbase",
+            "avsox": "avsox",
+            "dahlia": "dahlia",
+            "dmm": "dmm",
+            "faleno": "faleno",
+            "fc2": "fc2",
+            "fc2club": "fc2club",
+            "fc2ppvdb": "fc2ppvdb",
+            "freejavbt": "freejavbt",
+            "getchu": "getchu",
+            "gfriends": "gfriends",
+            "giga": "giga",
+            "iqqtv": "iqqtv",
+            "jav321": "jav321",
+            "javbus": "javbus",
+            "javdb": "javdb",
+            "javlibrary": "javlibrary",
+            "kin8": "kin8",
+            "mgstage": "mgstage",
+            "minnano": "minnano",
+            "official": "official",
+            "prestige": "prestige",
+            "r18dev": "r18dev",
+            "theporndb": "theporndb",
+            "wikipedia": "wikipedia",
+            "xcity": "xcity"
+          },
+          "$": {
+            "options": {
+              "airav": "airav",
+              "avbase": "avbase",
+              "avsox": "avsox",
+              "dahlia": "dahlia",
+              "dmm": "dmm",
+              "faleno": "faleno",
+              "fc2": "fc2",
+              "fc2club": "fc2club",
+              "fc2ppvdb": "fc2ppvdb",
+              "freejavbt": "freejavbt",
+              "getchu": "getchu",
+              "gfriends": "gfriends",
+              "giga": "giga",
+              "iqqtv": "iqqtv",
+              "jav321": "jav321",
+              "javbus": "javbus",
+              "javdb": "javdb",
+              "javlibrary": "javlibrary",
+              "kin8": "kin8",
+              "mgstage": "mgstage",
+              "minnano": "minnano",
+              "official": "official",
+              "prestige": "prestige",
+              "r18dev": "r18dev",
+              "theporndb": "theporndb",
+              "wikipedia": "wikipedia",
+              "xcity": "xcity"
+            }
+          }
+        }
+      },
+      "field_language": {
+        "label": "字段语言偏好",
+        "options": {
+          "title": "标题",
+          "actors": "演员",
+          "tags": "标签",
+          "release": "发行日期",
+          "runtime": "时长",
+          "directors": "导演",
+          "series": "系列",
+          "studio": "制作商",
+          "publisher": "发行商",
+          "plot": "剧情",
+          "poster_urls": "海报",
+          "thumb_urls": "封面",
+          "trailer_urls": "预告片",
+          "extrafanart": "剧照",
+          "score": "评分"
+        },
+        "$": {
+          "options": {
+            "zh_cn": "简体中文",
+            "zh_tw": "繁体中文",
+            "jp": "日语",
+            "en": "英语"
+          }
+        }
+      },
+      "site_config": {
+        "label": "站点配置",
+        "description": "按站点单独设置",
+        "options": {
+          "airav": "airav",
+          "avbase": "avbase",
+          "avsox": "avsox",
+          "dahlia": "dahlia",
+          "dmm": "dmm",
+          "faleno": "faleno",
+          "fc2": "fc2",
+          "fc2club": "fc2club",
+          "fc2ppvdb": "fc2ppvdb",
+          "freejavbt": "freejavbt",
+          "getchu": "getchu",
+          "gfriends": "gfriends",
+          "giga": "giga",
+          "iqqtv": "iqqtv",
+          "jav321": "jav321",
+          "javbus": "javbus",
+          "javdb": "javdb",
+          "javlibrary": "javlibrary",
+          "kin8": "kin8",
+          "mgstage": "mgstage",
+          "minnano": "minnano",
+          "official": "official",
+          "prestige": "prestige",
+          "r18dev": "r18dev",
+          "theporndb": "theporndb",
+          "wikipedia": "wikipedia",
+          "xcity": "xcity"
+        },
+        "$": {
+          "base_url": {
+            "label": "自定义域名",
+            "description": "覆盖该站点的默认域名"
+          },
+          "use_proxy": {
+            "label": "使用代理",
+            "description": "通过配置的代理发送请求"
+          },
+          "proxy": {
+            "label": "站点代理",
+            "description": "该站点专用的代理地址, 留空使用全局代理; 关闭「使用代理」时该站点直连"
+          },
+          "use_browser": {
+            "label": "浏览器策略",
+            "options": {
+              "off": "关闭",
+              "auto": "自适应",
+              "always": "始终"
+            }
+          },
+          "browser_backend": {
+            "label": "浏览器后端",
+            "description": "覆盖全局后端; 关闭表示该来源禁用浏览器",
+            "options": {
+              "off": "关闭",
+              "patchright": "Patchright",
+              "camoufox": "Camoufox",
+              "solver": "Solver 服务"
+            }
+          },
+          "cookie": {
+            "label": "Cookie",
+            "description": "用于需要登录的站点等"
+          },
+          "api_token": {
+            "label": "API Token",
+            "description": "该站点专用的访问凭据"
+          },
+          "official_routes": {
+            "label": "制作商路由",
+            "description": "按番号前缀指定制作商",
+            "$": {
+              "options": {
+                "attackers": "Attackers",
+                "befree": "BeFree",
+                "bi": "Bi",
+                "bibian": "Bibian",
+                "das": "DAS",
+                "ebody": "E-BODY",
+                "fitch": "Fitch",
+                "hajime_kikaku": "Hajime Kikaku",
+                "honnaka": "Honnaka",
+                "hunter": "Hunter",
+                "idea_pocket": "IdeaPocket",
+                "kawaii": "kawaii",
+                "kirakira": "kira☆kira",
+                "madonna": "Madonna",
+                "miman": "Miman",
+                "mko_labo": "MKO Labo",
+                "moodyz": "MOODYZ",
+                "muku": "Muku",
+                "mvg": "MVG",
+                "nanpa_japan": "Nanpa Japan",
+                "oppai": "OPPAI",
+                "opera": "OPERA",
+                "premium_beauty": "PREMIUM",
+                "rookie": "ROOKIE",
+                "s1": "S1",
+                "tameikegoro": "Tameike Goro",
+                "tosatsu": "Tosatsu",
+                "v": "V",
+                "wanz_factory": "WANZ Factory"
+              }
+            }
+          },
+          "rate_limit": {
+            "label": "速率限制",
+            "description": "该站点每秒请求上限"
+          },
+          "languages": {
+            "label": "语言优先级",
+            "description": "按顺序取第一个有正文的词条",
+            "$": {
+              "options": {
+                "zh": "中文",
+                "ja": "日文",
+                "en": "英文"
+              }
+            }
+          }
+        }
+      },
+      "content_routes": {
+        "label": "类型路由",
+        "description": "按影片类型指定来源站点和默认优先级",
+        "options": {
+          "censored": "有码",
+          "uncensored": "无码",
+          "chinese": "国产",
+          "western": "欧美",
+          "fc2": "FC2",
+          "amateur": "素人",
+          "hentai": "动漫"
+        },
+        "$": {
+          "options": {
+            "airav": "airav",
+            "avbase": "avbase",
+            "avsox": "avsox",
+            "dahlia": "dahlia",
+            "dmm": "dmm",
+            "faleno": "faleno",
+            "fc2": "fc2",
+            "fc2club": "fc2club",
+            "fc2ppvdb": "fc2ppvdb",
+            "freejavbt": "freejavbt",
+            "getchu": "getchu",
+            "gfriends": "gfriends",
+            "giga": "giga",
+            "iqqtv": "iqqtv",
+            "jav321": "jav321",
+            "javbus": "javbus",
+            "javdb": "javdb",
+            "javlibrary": "javlibrary",
+            "kin8": "kin8",
+            "mgstage": "mgstage",
+            "minnano": "minnano",
+            "official": "official",
+            "prestige": "prestige",
+            "r18dev": "r18dev",
+            "theporndb": "theporndb",
+            "wikipedia": "wikipedia",
+            "xcity": "xcity"
+          },
+          "$": {
+            "options": {
+              "airav": "airav",
+              "avbase": "avbase",
+              "avsox": "avsox",
+              "dahlia": "dahlia",
+              "dmm": "dmm",
+              "faleno": "faleno",
+              "fc2": "fc2",
+              "fc2club": "fc2club",
+              "fc2ppvdb": "fc2ppvdb",
+              "freejavbt": "freejavbt",
+              "getchu": "getchu",
+              "gfriends": "gfriends",
+              "giga": "giga",
+              "iqqtv": "iqqtv",
+              "jav321": "jav321",
+              "javbus": "javbus",
+              "javdb": "javdb",
+              "javlibrary": "javlibrary",
+              "kin8": "kin8",
+              "mgstage": "mgstage",
+              "minnano": "minnano",
+              "official": "official",
+              "prestige": "prestige",
+              "r18dev": "r18dev",
+              "theporndb": "theporndb",
+              "wikipedia": "wikipedia",
+              "xcity": "xcity"
+            }
+          }
+        }
+      }
+    },
+    "network": {
+      "proxy": {
+        "label": "代理",
+        "description": "HTTP/SOCKS5 代理地址 (如 socks5://127.0.0.1:1080)"
+      },
+      "timeout": {
+        "label": "请求超时",
+        "description": "HTTP 请求默认超时时间 (秒)"
+      },
+      "max_retries": {
+        "label": "最大重试次数",
+        "description": "请求失败时的重试次数上限, 不含首次请求; 0 表示只发一次"
+      },
+      "max_clients": {
+        "label": "最大连接数",
+        "description": "连接池最大连接数"
+      },
+      "browser": {
+        "label": "浏览器渲染",
+        "backend": {
+          "label": "浏览器后端",
+          "options": {
+            "off": "关闭",
+            "patchright": "Patchright",
+            "camoufox": "Camoufox",
+            "solver": "Solver 服务"
+          }
+        },
+        "timeout": {
+          "label": "页面请求超时",
+          "description": "浏览器超时(毫秒)"
+        },
+        "solver_url": {
+          "label": "Solver 地址",
+          "description": "FlareSolverr 兼容服务地址, 仅 solver 后端使用"
+        }
+      },
+      "chunked_threshold": {
+        "label": "分块阈值",
+        "description": "超过该大小(字节)时分块下载"
+      },
+      "chunk_size": {
+        "label": "分块大小",
+        "description": "每个分块的大小(字节)"
+      },
+      "concurrency": {
+        "label": "下载并发数",
+        "description": "最大并行分块下载数"
+      },
+      "rate_limits": {
+        "label": "速率限制",
+        "description": "按 Host (如 javdb.com) 限制请求速率, 优先级高于站点配置"
+      },
+      "default_rate_limit": {
+        "label": "默认速率限制",
+        "description": "未设置网站默认请求速率"
+      }
+    },
+    "worker": {
+      "concurrency": {
+        "label": "并发数",
+        "description": "同时执行的最大任务数"
+      },
+      "poll_interval": {
+        "label": "轮询间隔",
+        "description": "任务队列检查间隔 (秒)"
+      },
+      "shutdown_timeout": {
+        "label": "关闭超时",
+        "description": "关闭时等待活跃任务完成的最长时间 (秒)"
+      }
+    },
+    "watcher": {
+      "use_polling": {
+        "label": "轮询模式",
+        "description": "使用轮询代替系统事件 (适用于网络文件系统)"
+      },
+      "debounce_seconds": {
+        "label": "防抖窗口",
+        "description": "文件变动后等待的稳定时间 (秒), 避免重复触发"
+      },
+      "media_extensions": {
+        "label": "媒体扩展名",
+        "description": "监控和扫描的媒体文件扩展名列表, 逗号分隔"
+      }
+    },
+    "sr": {
+      "enabled": {
+        "label": "刮削时超分",
+        "description": "若关闭可用定时任务在空闲时超分"
+      },
+      "max_dim_threshold": {
+        "label": "超分尺寸阈值",
+        "description": "仅当图像长边小于此值时超分"
+      },
+      "max_bytes_threshold": {
+        "label": "超分文件大小阈值 (字节)",
+        "description": "仅当图片文件大小小于此值时超分"
+      },
+      "preset": {
+        "label": "预设",
+        "description": "选择超分工具及倍率",
+        "options": {
+          "realesr-photo-4x": "Real-ESRGAN-photo-4x",
+          "waifu-photo-2x": "waifu2x-photo-2x"
+        }
+      },
+      "output_format": {
+        "label": "输出格式",
+        "description": "超分后输出的图片格式",
+        "options": {
+          "jpg": "JPEG",
+          "png": "PNG",
+          "webp": "WebP"
+        }
+      },
+      "tta": {
+        "label": "启用 TTA (测试时增强)",
+        "description": "略微提升画质但耗时 x8"
+      }
+    },
+    "logging": {
+      "level": {
+        "label": "级别",
+        "options": {
+          "DEBUG": "调试",
+          "INFO": "信息",
+          "WARNING": "警告",
+          "ERROR": "错误",
+          "CRITICAL": "严重"
+        }
+      },
+      "debug_capture": {
+        "label": "调试捕获",
+        "description": "打开则为所有任务记录原始响应, 否则只记录失败任务"
+      }
+    },
+    "r18": {
+      "dsn": {
+        "label": "PostgreSQL 连接串",
+        "description": "超级用户连接串 (postgresql://user:pass@host:port), 需 CREATEDB/CREATEROLE 权限"
+      },
+      "db_name": {
+        "label": "数据库名",
+        "description": "导入时使用的库名, 由导入器自动创建"
+      },
+      "read_user": {
+        "label": "只读角色",
+        "description": "用于查询的只读账号, 由导入器自动创建并授权"
+      },
+      "read_password": {
+        "label": "只读角色密码"
+      },
+      "read_timeout": {
+        "label": "查询超时 (秒)",
+        "description": "单条查询的超时秒数"
+      },
+      "download_url": {
+        "label": "数据包地址",
+        "description": "r18.dev 数据包下载地址"
+      },
+      "psql_path": {
+        "label": "psql 路径"
+      }
+    },
+    "watermark": {
+      "enabled": {
+        "label": "启用水印"
+      },
+      "scale": {
+        "label": "水印大小",
+        "description": "相对图片高度的比例"
+      },
+      "corners": {
+        "label": "水印位置",
+        "description": "同角多个按中字 → 无码 → 破解 → 流出 → 分辨率顺序叠加",
+        "options": {
+          "subtitle": "中字",
+          "uncensored": "无码",
+          "cracked": "破解",
+          "leaked": "流出",
+          "definition": "分辨率"
+        },
+        "$": {
+          "options": {
+            "top_left": "左上",
+            "top_right": "右上",
+            "bottom_left": "左下",
+            "bottom_right": "右下"
+          }
+        }
+      }
+    },
+    "actor_scraping": {
+      "profile_sites": {
+        "label": "演员资料优先级",
+        "options": {
+          "avbase": "avbase",
+          "javdb": "javdb",
+          "minnano": "minnano",
+          "theporndb": "theporndb",
+          "wikipedia": "wikipedia"
+        },
+        "$": {
+          "options": {
+            "avbase": "avbase",
+            "javdb": "javdb",
+            "minnano": "minnano",
+            "theporndb": "theporndb",
+            "wikipedia": "wikipedia"
+          }
+        }
+      },
+      "image_sites": {
+        "label": "头像来源优先级",
+        "options": {
+          "gfriends": "gfriends"
+        },
+        "$": {
+          "options": {
+            "gfriends": "gfriends"
+          }
+        }
+      },
+      "download_images": {
+        "label": "下载头像"
+      },
+      "auto_scrape": {
+        "label": "自动刮削",
+        "description": "影片刮削时自动刮削演员"
+      },
+      "gfriends_repo": {
+        "label": "gFriends 仓库",
+        "description": "gFriends GitHub 仓库 URL"
+      }
+    },
+    "plugins": {
+      "enabled": {
+        "label": "启用插件",
+        "description": "允许该插件参与刮削来源路由"
+      },
+      "config": {
+        "label": "插件配置",
+        "description": "由插件提供的配置项"
+      }
+    },
+    "notify": {
+      "dingtalk_enabled": {
+        "label": "启用钉钉通知",
+        "description": "一批影片处理完后, 向钉钉群发一条汇总: 处理数量、成功数、失败数"
+      },
+      "dingtalk_webhook": {
+        "label": "机器人 Webhook",
+        "description": "钉钉群 → 群设置 → 机器人 → 自定义机器人, 复制其 Webhook 地址 (须以 https://oapi.dingtalk.com/robot/send?access_token= 开头)"
+      },
+      "dingtalk_secret": {
+        "label": "加签密钥",
+        "description": "机器人安全设置选「加签」时填 SEC 开头的密钥; 否则留空"
+      },
+      "dingtalk_keyword": {
+        "label": "自定义关键词",
+        "description": "机器人安全设置选「自定义关键词」时填其中一个; 否则留空"
+      },
+      "quiet_seconds": {
+        "label": "静默等待",
+        "description": "任务队列清空后再等多少秒才发送汇总 (秒); 期间又有新任务则继续累计"
+      },
+      "max_wait_minutes": {
+        "label": "最长间隔",
+        "description": "队列一直不空时, 至少每隔多少分钟发送一次已累计的汇总 (分钟)"
+      },
+      "use_proxy": {
+        "label": "使用代理",
+        "description": "经「网络」里的全局代理发送; 钉钉在国内, 一般保持关闭"
+      }
+    },
+    "emby": {
+      "enabled": {
+        "label": "启用演员头像同步",
+        "description": "把 amane 本地已有的演员头像上传给 Emby / Jellyfin 里还没有头像的演员, 不依赖 Emby 访问外网"
+      },
+      "url": {
+        "label": "服务器地址",
+        "description": "如 http://192.168.1.10:8096 (Emby 的访问地址, 末尾的 / 和 /emby 可省略)"
+      },
+      "api_key": {
+        "label": "API 密钥",
+        "description": "Emby 控制台 → 高级 → API 密钥 → 新建"
+      },
+      "interval_minutes": {
+        "label": "同步间隔",
+        "description": "自动同步的间隔 (分钟); 每轮只处理仍没有头像的演员. 保存设置后会立刻同步一次"
+      },
+      "auto_after_batch": {
+        "label": "批次完成后自动同步",
+        "description": "一批刮削 / 整理做完后, 自动通知 Emby 扫描媒体库, 等待下面设置的分钟数后同步头像. 会让 Emby 刷新整个库, 库很大时它会忙一阵"
+      },
+      "refresh_wait_minutes": {
+        "label": "扫描等待时间",
+        "description": "通知 Emby 扫描后等多少分钟再同步 (分钟); 演员要先被 Emby 扫描入库才存在. 没传完的由周期同步补上"
+      },
+      "use_proxy": {
+        "label": "使用代理",
+        "description": "经「网络」里的全局代理访问; Emby 通常在内网, 一般保持关闭"
+      }
+    },
+    "translate": {
+      "enabled": {
+        "label": "启用翻译",
+        "description": "刮削时用谷歌免费翻译把标题 / 简介翻成「字段语言」里设定的目标语言; 无需密钥, 经「网络」里的全局代理访问 (国内一般需要代理). 失败时保留原文"
+      },
+      "translate_fields": {
+        "label": "翻译字段",
+        "description": "需要翻译的字段; 目标语言取自刮削设置里各字段的语言",
+        "$": {
+          "options": {
+            "title": "标题",
+            "actors": "演员",
+            "tags": "标签",
+            "release": "发行日期",
+            "runtime": "时长",
+            "directors": "导演",
+            "series": "系列",
+            "studio": "制作商",
+            "publisher": "发行商",
+            "plot": "剧情",
+            "poster_urls": "海报",
+            "thumb_urls": "封面",
+            "trailer_urls": "预告片",
+            "extrafanart": "剧照",
+            "score": "评分"
+          }
+        }
+      }
+    }
+  },
+  "embySync": {
+    "button": "同步演员头像",
+    "hint": "把 amane 本地已有的演员头像上传给 Emby. 地址和密钥在「设置 → Emby」里填写",
+    "failed": "同步失败",
+    "loadFailed": "无法读取 Emby 媒体库",
+    "title": "同步演员头像到 Emby",
+    "libraries": "Emby 媒体库",
+    "librariesPlaceholder": "留空 = 整个 Emby",
+    "mode": "同步方式",
+    "modeFill": "只补缺失",
+    "modeOverwrite": "覆盖已有",
+    "modeFillHint": "只给 Emby 里还没有头像的演员上传, 已有头像的不动",
+    "modeOverwriteHint": "用 amane 的头像替换 Emby 里已有的头像, 包括已经有的; 每次都会重新上传",
+    "run": "开始同步",
+    "close": "关闭",
+    "summary": "Emby 共 {{persons}} 位演员 (已有头像而跳过 {{skipped}}), 本次处理 {{targeted}}, 已上传 {{uploaded}}",
+    "noLocal": "amane 里没有本地头像: {{count}} 位 ({{names}}); 先对这些演员做演员刮削",
+    "notInAmane": "amane 演员库里找不到同名演员: {{count}} 位 ({{names}})",
+    "failedLine": "上传失败: {{count}} 位 ({{names}}); 详情见日志"
+  }
+}

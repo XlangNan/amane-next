@@ -1,0 +1,13 @@
+/*
+  嵌套对象缩进: 每层累加, 窄屏减小; 约 305px 宽时三层之后控件只剩约 270px.
+  缩进不能写在 `pl` 属性里: 内联值只在加了 `!important` 时才受媒体查询约束.
+*/
+.nest {
+  padding-left: var(--mantine-spacing-sm);
+}
+
+@media (max-width: 47.99em) {
+  .nest {
+    padding-left: var(--mantine-spacing-xs);
+  }
+}

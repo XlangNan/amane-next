@@ -1,0 +1,49 @@
+/*
+  评论区: 卡片底色抬高一档 (浅色 gray-1, 深色 dark-5), 与页面底色分开 —— 深色下卡片默认
+  底色 dark-6 与页面 dark-7 只差一档, 整块读不出来.
+*/
+.card {
+  --comment-rule: light-dark(var(--mantine-color-gray-3), var(--mantine-color-dark-4));
+  background: light-dark(var(--mantine-color-gray-1), var(--mantine-color-dark-5));
+}
+
+.item {
+  padding: var(--mantine-spacing-sm) 0;
+}
+
+.item + .item {
+  border-top: 1px solid var(--comment-rule);
+}
+
+/* 最后一条与发表区分开. */
+.item:last-child {
+  border-bottom: 1px solid var(--comment-rule);
+}
+
+/* 楼号: 与相对时间同一行, 用中性胶囊把序号与文案分开; 不用品牌色, 避免与时间戳胶囊混淆. */
+.floor {
+  padding: 0 5px;
+  border-radius: 4px;
+  background: light-dark(var(--mantine-color-gray-3), var(--mantine-color-dark-4));
+  color: light-dark(var(--mantine-color-gray-8), var(--mantine-color-dark-1));
+  font-family: var(--mantine-font-family-monospace);
+  font-size: var(--mantine-font-size-xs);
+  line-height: 1.6;
+}
+
+/*
+  行内操作紧跟在时间之后, 只在指针悬浮该条或焦点进入该条时出现.
+  只在 (hover: hover) 下隐藏 —— 触摸设备没有悬浮态, 隐藏会让按钮永远点不到.
+  opacity 为 0 的元素仍可聚焦, 因此键盘 Tab 进来时由 :focus-within 显示; 隐藏期间仍占位, 显示时不重排.
+*/
+@media (hover: hover) {
+  .actions {
+    opacity: 0;
+    transition: opacity 120ms ease-out;
+  }
+
+  .item:hover .actions,
+  .item:focus-within .actions {
+    opacity: 1;
+  }
+}
