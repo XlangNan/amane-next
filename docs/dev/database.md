@@ -10,7 +10,6 @@
 | 库 | 引擎 | 归属 | 纳入 Alembic |
 |----|------|------|------------|
 | `amane.db` | SQLite | 主业务库 (metadata / tasks / resources ...) | ✅ 启动期 `upgrade head` |
-| `translations.db` | SQLite | LLM 译文缓存 (会话级, 删文件即清空) | ❌ 自建表, 见 [llm.md](llm.md) |
 | r18.dev 镜像 | **PostgreSQL** | 外部只读数据源 (用户自备实例) | ❌ schema 由 r18 dump 决定, 项目不拥有 |
 
 r18 库由项目导入 / 管理但 schema 不受我们控制, **不能纳入 Alembic** — 项目对其只读; 兼容性靠导入期探针校验, 不靠迁移, 见 [crawlers.md](crawlers.md).
@@ -60,7 +59,7 @@ SQLite 不支持删列、改类型等 ALTER TABLE 操作, Alembic 通过 batch m
 | 层 | 形态 |
 |----|------|
 | Python / API / OpenAPI / 配置 TOML | value |
-| JSON 列、`Task.payload`、`translations.db` | value |
+| JSON 列、`Task.payload` | value |
 | 枚举型表列 (`Field(Enum)`) | **成员名** |
 
 SQLite 没有原生 enum, 列仍是 VARCHAR. 不能使用 `Column(String)` 或 `values_callable` 按 value 落库 — ORM 会读出 `str`. 裸 SQL 绑定成员名; ORM 比较用 `is`.

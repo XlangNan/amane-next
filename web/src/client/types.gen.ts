@@ -1676,11 +1676,9 @@ export type HealthResponse = {
 export type HotSettings = {
     scraping?: ScrapingConfig;
     actor_scraping?: ActorScrapingConfig;
-    agent?: AgentConfig;
     network?: NetworkConfig;
     sr?: SrConfig;
     watermark?: WatermarkConfig;
-    llm?: LlmConfig;
     r18?: R18Config;
     watcher?: WatcherConfig;
     worker?: WorkerConfig;

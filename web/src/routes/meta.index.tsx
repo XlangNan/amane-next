@@ -1,5 +1,5 @@
 import { ActionIcon, Badge, Group, SegmentedControl, Text, TextInput, Title } from "@mantine/core";
-import { IconFilter, IconSearch, IconTable, IconX } from "@tabler/icons-react";
+import { IconFilter, IconSearch, IconX } from "@tabler/icons-react";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { createFileRoute, stripSearchParams } from "@tanstack/react-router";
 import { useMemo, useRef, useState } from "react";
@@ -109,7 +109,7 @@ function ActiveTriChip({ label, onClear }: { label: string; onClear: () => void 
 }
 
 function MetaIndexPage() {
-  const { t } = useTranslation(["metadata", "common", "savedQueries"]);
+  const { t } = useTranslation(["metadata", "common"]);
   const search = Route.useSearch();
   const navigate = Route.useNavigate();
   const listLimit = useUIStore((s) => s.pageSizes.metaList);
@@ -388,37 +388,6 @@ function MetaIndexPage() {
     >
       {hasActiveFilters && (
         <Group gap="xs">
-          {search.saved_query_id != null && (
-            <Group gap={4} wrap="nowrap">
-              <Badge variant="outline">
-                {t("common:nav.savedQueries")}: #{search.saved_query_id}
-              </Badge>
-              <ActionIcon
-                size="sm"
-                variant="subtle"
-                component="a"
-                href={`/saved-queries/${search.saved_query_id}`}
-                target="_blank"
-                rel="noreferrer"
-                aria-label={t("savedQueries:openData")}
-              >
-                <IconTable size={14} />
-              </ActionIcon>
-              <ActionIcon
-                size="sm"
-                variant="subtle"
-                color="gray"
-                onClick={() =>
-                  void navigate({
-                    search: (prev) => ({ ...prev, saved_query_id: undefined, page: 1 }),
-                  })
-                }
-                aria-label="clear"
-              >
-                <IconX size={14} />
-              </ActionIcon>
-            </Group>
-          )}
           {hasFiles !== null && (
             <ActiveHasFilesChip hasFiles={hasFiles} onClear={() => setHasFilesFilter(null)} />
           )}

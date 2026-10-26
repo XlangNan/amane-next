@@ -10,7 +10,6 @@ from typing import TYPE_CHECKING
 
 import structlog
 
-from ..agent import AgentService, ResultCache
 from ..config import SAFE_DIRS_ALLOW_ALL, ColdSettings, ConfigManager
 from ..config.token import resolve_api_token
 from ..db.engine import create_async_engine_from_path
@@ -20,7 +19,6 @@ from ..emby import EmbyActorSync
 from ..events import EventBus
 from ..handlers import LibraryTaskLocks
 from ..library import InventoryStore
-from ..llm import TranslationCache
 from ..media import ResourceStore
 from ..notify import BatchNotifier
 from ..observability import setup_logging
@@ -100,8 +98,6 @@ class AppSession:
         if self.runtime.browser is not None:
             await self.runtime.browser.close()
         await self.runtime.web_client.close()
-        if self.runtime.translation_cache is not None:
-            await self.runtime.translation_cache.close()
         await self._engine.dispose()
         logger.info("amane service stopped")
 
@@ -150,18 +146,6 @@ async def start_app(config: ConfigManager | None = None) -> AppSession:
 
     resource_store = ResourceStore(engine=engine, base_dir=cold.data_dir / "resources")
 
-    # 独立 SQLite, 不纳入 Alembic; 删除文件即清空. 惰性建连.
-    translation_cache = TranslationCache(cold.data_dir / "translations.db")
-
-    # 会话级 ResultCache; rebuild 只换工厂, 不清除缓存
-    agent_service = AgentService(
-        db_path=cold.db_path,
-        data_dir=cold.data_dir,
-        repo=repo,
-        cache=ResultCache(ttl_s=hot.agent.result_cache_ttl_s, max_entries=hot.agent.result_cache_max_entries),
-        config=hot.agent,
-    )
-
     # 信任边界: 安全目录 + API token
     safe_dirs = build_safe_dirs(cold, repo_watch_paths=[lib.path for lib in await repo.list_libraries()])
     if safe_dirs is None:
@@ -181,7 +165,6 @@ async def start_app(config: ConfigManager | None = None) -> AppSession:
         resource_store,
         hot,
         safe_dirs,
-        translation_cache,
         cold.data_dir,
         plugin_manager,
         library_locks=library_locks,
@@ -240,9 +223,7 @@ async def start_app(config: ConfigManager | None = None) -> AppSession:
         feed_service=feed_service,
         safe_dirs=safe_dirs,
         api_token=api_token,
-        translation_cache=translation_cache,
         r18_db=r18_db,
-        agent_service=agent_service,
         plugin_manager=plugin_manager,
         playback_state=playback_state,
         library_locks=library_locks,
@@ -265,10 +246,6 @@ async def start_app(config: ConfigManager | None = None) -> AppSession:
     runtime.emby_sync = emby_sync
     event_bus.add_listener(emby_sync.on_event)
     emby_sync.start()
-    agent_service.bridge.safe_dirs = None if safe_dirs is None else list(safe_dirs)
-    agent_service.bridge.watcher = watcher_service
-    agent_service.bridge.cancel_running_task = runtime.cancel_task
-    agent_service.bridge.poll_feed = feed_service.poll_one
 
     logger.info("amane service ready")
     return AppSession(

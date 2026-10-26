@@ -37,15 +37,13 @@ from amane.api.models import (
     PartialMetadata,
     ScheduleUpdateRequest,
 )
-from amane.api.models.saved_queries import SavedQueryUpdateRequest
-from amane.db import Feed, Library, MediaFile, Metadata, Repository, SavedQuery, Schedule
+from amane.db import Feed, Library, MediaFile, Metadata, Repository, Schedule
 from amane.db.models import RoutineType
 from amane.db.repo_types import (
     FeedUpdates,
     LibraryUpdates,
     MediaFileUpdates,
     MetadataFields,
-    SavedQueryUpdates,
     ScheduleUpdates,
 )
 from amane.utils.model import assert_model_subset, create_partial_model
@@ -348,14 +346,8 @@ _DISCIPLINE = [
         Feed,
         {"id", "etag", "last_modified", "next_fetch_at", "last_fetched_at", "last_error", "last_enqueued"},
     ),
-    (
-        SavedQueryUpdateRequest,
-        SavedQueryUpdates,
-        SavedQuery,
-        {"id", "entity", "session_id", "persisted", "created_at", "updated_at"},
-    ),
 ]
-_DISCIPLINE_IDS = ["media", "library", "schedule", "metadata", "feed", "saved_query"]
+_DISCIPLINE_IDS = ["media", "library", "schedule", "metadata", "feed"]
 
 
 class TestCovariantSubsetOfLibrary:

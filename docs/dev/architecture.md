@@ -17,8 +17,7 @@
 | `aggregate/` | 多源优先级 → `AggregatedMetadata` / `AggregatedActor` | 影片按获取图两段并发执行; 演员为档案填空 + 头像优先; 不写 DB |
 | `handlers/` | DB Task → 副作用 (写 metadata / 移动文件 / 排队) | 编排层, 不实现解析 / 爬取 / IO 细节 |
 | `media/` `organize/` | 元数据 + 路径模板 → 磁盘文件 | 调用方传配置, 自身不读 `HotSettings` 全局 |
-| `llm/` | 大模型接入 + 翻译协议 + 译文缓存 | 管线只依赖 `Translator` 协议; provider 映射与 `agent/` 共用, 配置分离 |
-| `agent/` | 助理 Agent + Saved Query + 会话 trace | 读为只读 SQL, 写只经封装工具; 与 `llm/` 配置分离, 见 [agent.md](agent.md) |
+| `translate/` | 谷歌免费翻译 (gtx) + 中文简繁 zhconv | 经 `WebClient` 出站; 失败返回 None 保留原文, 不缓存 |
 | `sr/` | 超分二进制封装 | 就地覆盖本地资源文件 |
 | `db/` | SQLModel 表 + 异步 Repository | 单一数据源; 启动期自动 `alembic upgrade head` |
 | `library/` | 库文件规则与归类 (`LibraryScan.classify`) + 清理清单 (`cleanup/` 子包) 与库内删除执行单元 + CloudDrive 虚拟路径规范 | 扩展名 / 预告片与文件黑名单正则 / `.amane_trash` / 大小阈值 / `cloud_path`; handlers 与 scheduler 共用, 只有 `cleanup/` 归清理功能 |
@@ -40,7 +39,7 @@
 ```
 EventBus → 日志 → 来源插件发现 → 主 DB engine + Repository → r18 只读引擎 (可选)
         → RateLimiters → WebClient → HttpClient → CrawlerFactory
-        → ResourceStore → TranslationCache → AgentService → safe_dirs + api_token
+        → ResourceStore → safe_dirs + api_token
         → Handlers → AsyncWorker → CronScheduler → FeedService → WatcherService
 ```
 

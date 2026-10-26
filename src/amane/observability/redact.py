@@ -11,14 +11,14 @@ from sqlalchemy.engine.url import make_url
 from .models import REDACTION_PLACEHOLDER
 
 # scrape 回放只需这些 section; watcher/worker/logging/sr 对解析无贡献
-_SCRAPE_HOT_KEYS: tuple[str, ...] = ("scraping", "network", "llm", "r18", "plugins")
+_SCRAPE_HOT_KEYS: tuple[str, ...] = ("scraping", "network", "r18", "plugins")
 
 
 def hot_slice_for_task(hot_dump: dict[str, Any], task_type: str) -> dict[str, Any]:
     """去掉与回放无关的噪声 section."""
     if task_type == "scrape":
         return {k: deepcopy(hot_dump[k]) for k in _SCRAPE_HOT_KEYS if k in hot_dump}
-    drop = {"watcher", "worker", "logging"}
+    drop = {"watcher", "worker", "logging", "notify", "emby"}
     return {k: deepcopy(v) for k, v in hot_dump.items() if k not in drop}
 
 
@@ -33,8 +33,11 @@ def needs_secrets_file(hot_dump: dict[str, Any]) -> bool:
                     continue
                 if site_cfg.get("cookie") or site_cfg.get("api_token"):
                     return True
-    llm = hot_dump.get("llm")
-    if isinstance(llm, dict) and llm.get("api_key"):
+    emby = hot_dump.get("emby")
+    if isinstance(emby, dict) and emby.get("api_key"):
+        return True
+    notify = hot_dump.get("notify")
+    if isinstance(notify, dict) and (notify.get("dingtalk_webhook") or notify.get("dingtalk_secret")):
         return True
     network = hot_dump.get("network")
     if isinstance(network, dict) and network.get("proxy"):
@@ -75,9 +78,15 @@ def redact_hot(data: dict[str, Any]) -> dict[str, Any]:
                 if site_cfg.get("api_token"):
                     site_cfg["api_token"] = REDACTION_PLACEHOLDER
 
-    llm = out.get("llm")
-    if isinstance(llm, dict) and llm.get("api_key"):
-        llm["api_key"] = REDACTION_PLACEHOLDER
+    emby = out.get("emby")
+    if isinstance(emby, dict) and emby.get("api_key"):
+        emby["api_key"] = REDACTION_PLACEHOLDER
+
+    notify = out.get("notify")
+    if isinstance(notify, dict):
+        for key in ("dingtalk_webhook", "dingtalk_secret"):
+            if notify.get(key):
+                notify[key] = REDACTION_PLACEHOLDER
 
     network = out.get("network")
     if isinstance(network, dict) and network.get("proxy"):

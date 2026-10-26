@@ -10,25 +10,30 @@ def test_hot_slice_scrape_drops_noise():
     full = {
         "scraping": {"a": 1},
         "network": {"b": 2},
-        "llm": {},
         "r18": {},
         "plugins": {},
         "watcher": {"x": 1},
         "worker": {"y": 1},
         "logging": {"level": "INFO"},
+        "notify": {"dingtalk_webhook": "https://oapi.dingtalk.com/robot/send?access_token=t"},
+        "emby": {"api_key": "k"},
         "sr": {},
     }
-    assert set(hot_slice_for_task(full, "scrape").keys()) == {"scraping", "network", "llm", "r18", "plugins"}
+    assert set(hot_slice_for_task(full, "scrape").keys()) == {"scraping", "network", "r18", "plugins"}
+    assert {"notify", "emby", "watcher", "worker", "logging"}.isdisjoint(hot_slice_for_task(full, "organize"))
 
 
 @pytest.mark.parametrize(
     ("dump", "expected"),
     [
-        ({"scraping": {"site_config": {"javdb": {"cookie": {}}}}, "llm": {}, "network": {}, "r18": {}}, False),
-        ({"scraping": {"site_config": {"javdb": {"cookie": {"a": "b"}}}}, "llm": {}, "network": {}, "r18": {}}, True),
-        ({"scraping": {"site_config": {}}, "llm": {"api_key": "k"}, "network": {}, "r18": {}}, True),
-        ({"scraping": {"site_config": {}}, "llm": {}, "network": {}, "r18": {"dsn": "postgresql://u:p@h/db"}}, True),
-        ({"scraping": {"site_config": {}}, "llm": {}, "network": {}, "r18": {"read_password": "default"}}, False),
+        ({"scraping": {"site_config": {"javdb": {"cookie": {}}}}, "network": {}, "r18": {}}, False),
+        ({"scraping": {"site_config": {"javdb": {"cookie": {"a": "b"}}}}, "network": {}, "r18": {}}, True),
+        ({"scraping": {"site_config": {}}, "emby": {"api_key": "k"}, "network": {}, "r18": {}}, True),
+        ({"emby": {"api_key": ""}, "notify": {"dingtalk_webhook": "", "dingtalk_secret": ""}}, False),
+        ({"notify": {"dingtalk_webhook": "https://oapi.dingtalk.com/robot/send?access_token=t"}}, True),
+        ({"notify": {"dingtalk_secret": "SECabc"}}, True),
+        ({"scraping": {"site_config": {}}, "network": {}, "r18": {"dsn": "postgresql://u:p@h/db"}}, True),
+        ({"scraping": {"site_config": {}}, "network": {}, "r18": {"read_password": "default"}}, False),
         ({"plugins": {"acme.fake": {"config": {"api_token": "secret"}}}}, True),
     ],
 )
@@ -64,11 +69,17 @@ def test_needs_secrets_file(dump: dict, expected: bool):
             id="empty-cookie-unchanged",
         ),
         pytest.param(
-            {"llm": {"api_key": "sk-live", "enabled": True}},
-            lambda out: out["llm"]["api_key"] == REDACTION_PLACEHOLDER and out["llm"]["enabled"] is True,
-            id="llm-api-key",
+            {"emby": {"api_key": "sk-live", "enabled": True}},
+            lambda out: out["emby"]["api_key"] == REDACTION_PLACEHOLDER and out["emby"]["enabled"] is True,
+            id="emby-api-key",
         ),
-        pytest.param({"llm": {"api_key": None}}, lambda out: out["llm"]["api_key"] is None, id="llm-api-key-null"),
+        pytest.param({"emby": {"api_key": ""}}, lambda out: out["emby"]["api_key"] == "", id="emby-api-key-empty"),
+        pytest.param(
+            {"notify": {"dingtalk_webhook": "https://x/y?access_token=t", "dingtalk_secret": "SEC"}},
+            lambda out: out["notify"]["dingtalk_webhook"] == REDACTION_PLACEHOLDER
+            and out["notify"]["dingtalk_secret"] == REDACTION_PLACEHOLDER,
+            id="dingtalk-secrets",
+        ),
         pytest.param(
             {"network": {"proxy": "socks5://user:pass@127.0.0.1:7890"}},
             lambda out: out["network"]["proxy"] == "socks5://127.0.0.1:7890",
@@ -112,11 +123,11 @@ def test_redact_hot(input_hot: dict, assertions):
 def test_redact_hot_does_not_mutate_input():
     original = {
         "scraping": {"site_config": {"javdb": {"cookie": {"a": "b"}, "api_token": "t"}}},
-        "llm": {"api_key": "k"},
+        "emby": {"api_key": "k"},
     }
     redact_hot(original)
     assert original["scraping"]["site_config"]["javdb"]["cookie"]["a"] == "b"
-    assert original["llm"]["api_key"] == "k"
+    assert original["emby"]["api_key"] == "k"
 
 
 @pytest.mark.parametrize(

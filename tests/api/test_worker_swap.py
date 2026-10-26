@@ -226,7 +226,7 @@ async def test_consecutive_changes_keep_each_task(
     second = await _submit_refresh(client, library_id)
     await asyncio.wait_for(blocker.generations[1][1].wait(), timeout=LOAD_TOLERANT_TIMEOUT)
 
-    resp = await client.patch("config", json={"agent": {"model": "gpt-5"}})
+    resp = await client.patch("config", json={"watermark": {"enabled": False}})
     assert resp.status_code == 200
     await asyncio.wait_for(runtime._retiring[-1].worker.wait_stopped(), timeout=LOAD_TOLERANT_TIMEOUT)
 

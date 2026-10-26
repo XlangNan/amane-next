@@ -1,5 +1,5 @@
 import { ActionIcon, Badge, Group, SegmentedControl, Text, TextInput, Title } from "@mantine/core";
-import { IconFilter, IconSearch, IconTable, IconX } from "@tabler/icons-react";
+import { IconFilter, IconSearch, IconX } from "@tabler/icons-react";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { createFileRoute, stripSearchParams } from "@tanstack/react-router";
 import type { ParseKeys } from "i18next";
@@ -106,7 +106,7 @@ function ActiveUserTagChip({ tagId, onClear }: { tagId: number; onClear: () => v
 function ActorsIndexPage() {
   const search = Route.useSearch();
   const navigate = Route.useNavigate();
-  const { t } = useTranslation(["metadata", "common", "savedQueries"]);
+  const { t } = useTranslation(["metadata", "common"]);
   const listLimit = useUIStore((s) => s.pageSizes.actorsList);
 
   const filters = actorFilterValuesFromSearch(search);
@@ -298,29 +298,6 @@ function ActorsIndexPage() {
     >
       {hasActiveFilters && (
         <Group gap="xs">
-          {search.saved_query_id != null && (
-            <Group gap={4} wrap="nowrap">
-              <ActiveFilterChip
-                label={`${t("common:nav.savedQueries")}: #${search.saved_query_id}`}
-                onClear={() =>
-                  void navigate({
-                    search: (prev) => ({ ...prev, saved_query_id: undefined, page: 1 }),
-                  })
-                }
-              />
-              <ActionIcon
-                size="sm"
-                variant="subtle"
-                component="a"
-                href={`/saved-queries/${search.saved_query_id}`}
-                target="_blank"
-                rel="noreferrer"
-                aria-label={t("savedQueries:openData")}
-              >
-                <IconTable size={14} />
-              </ActionIcon>
-            </Group>
-          )}
           {filters.gender.map((g) => (
             <ActiveFilterChip
               key={g}

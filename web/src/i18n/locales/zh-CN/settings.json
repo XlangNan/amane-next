@@ -3,16 +3,15 @@
   "tabs": {
     "scraping": "影片刮削",
     "actor_scraping": "演员刮削",
-    "agent": "智能体",
     "network": "网络",
     "worker": "任务引擎",
     "watcher": "文件监控",
     "logging": "日志",
     "sr": "图像超分",
-    "llm": "LLM 翻译",
     "watermark": "水印",
     "notify": "通知",
-    "emby": "Emby"
+    "emby": "Emby",
+    "translate": "翻译"
   },
   "config": {
     "loadError": "加载配置失败"
@@ -599,143 +598,6 @@
         "description": "打开则为所有任务记录原始响应, 否则只记录失败任务"
       }
     },
-    "llm": {
-      "enabled": {
-        "label": "启用 LLM 翻译",
-        "description": "刮削时翻译文本字段"
-      },
-      "api_key": {
-        "label": "API 密钥",
-        "description": "上游服务的密钥; 只保存在本机配置"
-      },
-      "api_type": {
-        "label": "API 类型",
-        "options": {
-          "chat": "Chat",
-          "response": "Responses",
-          "anthropic": "Anthropic"
-        }
-      },
-      "base_url": {
-        "label": "API 端点",
-        "description": "OpenAI 兼容 API BASE URL"
-      },
-      "model": {
-        "label": "模型"
-      },
-      "rate_limit": {
-        "label": "每秒请求上限"
-      },
-      "translate_fields": {
-        "label": "翻译字段",
-        "description": "当前仅支持标题/剧情",
-        "$": {
-          "options": {
-            "title": "标题",
-            "actors": "演员",
-            "tags": "标签",
-            "release": "发行日期",
-            "runtime": "时长",
-            "directors": "导演",
-            "series": "系列",
-            "studio": "制作商",
-            "publisher": "发行商",
-            "plot": "剧情",
-            "poster_urls": "海报",
-            "thumb_urls": "封面",
-            "trailer_urls": "预告片",
-            "extrafanart": "剧照",
-            "score": "评分"
-          }
-        }
-      },
-      "system_prompt": {
-        "label": "系统提示词"
-      },
-      "field_prompts": {
-        "label": "字段提示词",
-        "$": {
-          "label": "提示词"
-        },
-        "options": {
-          "title": "标题",
-          "actors": "演员",
-          "tags": "标签",
-          "release": "发行日期",
-          "runtime": "时长",
-          "directors": "导演",
-          "series": "系列",
-          "studio": "制作商",
-          "publisher": "发行商",
-          "plot": "剧情",
-          "poster_urls": "海报",
-          "thumb_urls": "封面",
-          "trailer_urls": "预告片",
-          "extrafanart": "剧照",
-          "score": "评分"
-        }
-      }
-    },
-    "agent": {
-      "api_type": {
-        "label": "API 类型",
-        "description": "如果供应商支持应优先使用 Responses 或 Anthropic",
-        "options": {
-          "chat": "Chat",
-          "response": "Responses",
-          "anthropic": "Anthropic"
-        }
-      },
-      "api_key": {
-        "label": "API 密钥"
-      },
-      "base_url": {
-        "label": "API 端点"
-      },
-      "model": {
-        "label": "模型"
-      },
-      "thinking": {
-        "label": "默认思考强度",
-        "description": "可在对话中修改",
-        "options": {
-          "off": "关闭",
-          "minimal": "最低",
-          "low": "低",
-          "medium": "中",
-          "high": "高",
-          "xhigh": "最高"
-        }
-      },
-      "max_tokens": {
-        "label": "最大输出 token",
-        "description": "单次回复的输出上限. 超过模型上限时上游拒绝请求"
-      },
-      "rate_limit": {
-        "label": "每秒请求上限",
-        "description": "参考供应商说明, 过高可能触发限流"
-      },
-      "sql_timeout_ms": {
-        "label": "查询默认超时 (毫秒)",
-        "description": "无需批准即可执行的查询默认超时; 超时查询需用户批准后执行"
-      },
-      "result_cache_ttl_s": {
-        "label": "结果缓存时长 (秒)",
-        "description": "交付结果内存缓存存活时长; 过期后重跑"
-      },
-      "result_cache_max_entries": {
-        "label": "结果缓存容量",
-        "description": "内存结果缓存最大条目数 (LRU)"
-      },
-      "history_ttl_s": {
-        "label": "会话历史内存时长 (秒)",
-        "description": "会话历史的内存缓存存活时长; 逐出后按需从磁盘装回"
-      },
-      "history_max_sessions": {
-        "label": "会话历史内存容量",
-        "description": "同时保留的会话历史上限 (LRU)"
-      }
-    },
     "r18": {
       "dsn": {
         "label": "PostgreSQL 连接串",
@@ -903,6 +765,35 @@
       "use_proxy": {
         "label": "使用代理",
         "description": "经「网络」里的全局代理访问; Emby 通常在内网, 一般保持关闭"
+      }
+    },
+    "translate": {
+      "enabled": {
+        "label": "启用翻译",
+        "description": "刮削时用谷歌免费翻译把标题 / 简介翻成「字段语言」里设定的目标语言; 无需密钥, 经「网络」里的全局代理访问 (国内一般需要代理). 失败时保留原文"
+      },
+      "translate_fields": {
+        "label": "翻译字段",
+        "description": "需要翻译的字段; 目标语言取自刮削设置里各字段的语言",
+        "$": {
+          "options": {
+            "title": "标题",
+            "actors": "演员",
+            "tags": "标签",
+            "release": "发行日期",
+            "runtime": "时长",
+            "directors": "导演",
+            "series": "系列",
+            "studio": "制作商",
+            "publisher": "发行商",
+            "plot": "剧情",
+            "poster_urls": "海报",
+            "thumb_urls": "封面",
+            "trailer_urls": "预告片",
+            "extrafanart": "剧照",
+            "score": "评分"
+          }
+        }
       }
     }
   },

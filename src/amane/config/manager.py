@@ -4,9 +4,8 @@ import os
 import tempfile
 import tomllib
 from copy import copy
-from enum import StrEnum
 from pathlib import Path
-from typing import Annotated, Any, Literal
+from typing import Any, Literal
 from urllib.parse import urlsplit
 
 import tomli_w
@@ -25,7 +24,6 @@ from ..crawlers.site_roles import (
 )
 from ..crawlers.sites.official import Manufacturer
 from ..enums import (
-    ApiType,
     BrowserBackendName,
     BrowserMode,
     DownloadableResource,
@@ -609,107 +607,6 @@ class SrConfig(BaseModel):
     tta: bool = Field(default=False, json_schema_extra={"x-hidden": True})
 
 
-PROMPT_MAX_LENGTH = 2000
-"""单条提示词长度上限, 避免超长文本撑大 TOML 与设置表单."""
-
-PromptText = Annotated[str, Field(max_length=PROMPT_MAX_LENGTH, json_schema_extra={"x-long": True})]
-"""提示词文本框: ``x-long`` 声明多行, 顶层字段与 dict 值共用同一控制符."""
-
-
-class LLMConfig(BaseModel):
-    """凭据放 Hot, 可在 UI 修改并热生效. 与 agent section 隔离."""
-
-    enabled: bool = False
-    """关闭时刮削管线跳过翻译步骤."""
-
-    translate_fields: list[MetadataField] = Field(default_factory=lambda: [MetadataField.TITLE, MetadataField.PLOT])
-    """当前仅支持文本标量字段 (title/plot)."""
-
-    system_prompt: str | None = Field(default=None, max_length=PROMPT_MAX_LENGTH, json_schema_extra={"x-long": True})
-    """自定义 system 提示词的指令部分; 空白等价于未配置, 使用内置.
-
-    可用 ``{target_lang}`` 引用目标语言名; 字段说明与输出约束由 Amane 追加, 不受此值影响.
-    """
-
-    field_prompts: dict[MetadataField, PromptText] = Field(default_factory=dict)
-    """逐字段覆盖内置字段说明; 值为空白的条目等价于未配置.
-
-    可用 ``{target_lang}`` 引用目标语言名. 未列出的字段使用内置说明.
-    """
-
-    api_key: str | None = None
-    """为空时即使 enabled 也不翻译."""
-
-    api_type: ApiType = ApiType.CHAT
-    base_url: str = "https://api.openai.com/v1"
-    model: str = ""
-    rate_limit: float = Field(default=2.0, ge=0.1, le=100)
-    """与站点限速隔离."""
-
-    @field_validator("system_prompt")
-    @classmethod
-    def _blank_system_prompt_is_unset(cls, value: str | None) -> str | None:
-        """空白提示词与未配置等价, 避免把空白串写进 TOML."""
-        if value is None:
-            return None
-        return value.strip() or None
-
-    @field_validator("field_prompts")
-    @classmethod
-    def _blank_field_prompts_are_unset(cls, value: dict[MetadataField, str]) -> dict[MetadataField, str]:
-        """空白条目与缺席等价, 与可增减 key 的 dict 编码语义一致."""
-        return {field: text.strip() for field, text in value.items() if text.strip()}
-
-
-class AgentThinkingMode(StrEnum):
-    """会话可覆盖; 全局为新建会话的回退默认."""
-
-    OFF = "off"
-    MINIMAL = "minimal"
-    LOW = "low"
-    MEDIUM = "medium"
-    HIGH = "high"
-    XHIGH = "xhigh"
-
-
-class AgentConfig(BaseModel):
-    """与 llm 翻译 section 分离: 凭据/模型/限速各自独立."""
-
-    api_type: ApiType = ApiType.RESPONSE
-    api_key: str | None = None
-    base_url: str = "https://api.openai.com/v1"
-    """可指向自建/第三方代理; anthropic 须填 Anthropic 端点."""
-
-    model: str = "gpt-4o-mini"
-    thinking: AgentThinkingMode | None = None
-    """新建会话的回退默认; None 表示不传 thinking. 会话可在 meta 覆盖."""
-
-    max_tokens: int = Field(default=128_000, ge=1)
-    """单次回复的输出上限. 超过模型上限时上游拒绝请求."""
-
-    rate_limit: float = Field(default=2.0, ge=0.1, le=100)
-    sql_timeout_ms: int = Field(default=1000, ge=50, le=60_000, json_schema_extra={"x-hidden": True})
-    """只读 SQL 默认超时 (毫秒). 超过须用户批准放宽."""
-
-    result_cache_ttl_s: int = Field(default=3600, ge=60, le=86_400, json_schema_extra={"x-hidden": True})
-    """过期后按 SQL 重新执行."""
-
-    result_cache_max_entries: int = Field(default=64, ge=1, le=1000, json_schema_extra={"x-hidden": True})
-    history_ttl_s: int = Field(default=3600, ge=60, le=86_400, json_schema_extra={"x-hidden": True})
-    """逐出后可从 data_dir messages.json 装回."""
-
-    history_max_sessions: int = Field(default=32, ge=1, le=500, json_schema_extra={"x-hidden": True})
-
-    @model_validator(mode="before")
-    @classmethod
-    def _drop_legacy_fields(cls, data: Any) -> Any:
-        """丢弃已移除的 enabled / max_retries."""
-        if isinstance(data, dict):
-            data.pop("enabled", None)
-            data.pop("max_retries", None)
-        return data
-
-
 class ActorScrapingConfig(BaseModel):
     """资料来源顺序填空, 头像来源优先."""
 
@@ -776,6 +673,16 @@ class EmbyConfig(BaseModel):
     """经「网络」里的全局代理访问. 媒体服务器通常在内网, 默认直连."""
 
 
+class TranslateConfig(BaseModel):
+    """刮削时翻译字段: 谷歌免费翻译, 无需密钥."""
+
+    enabled: bool = False
+    """关闭时刮削管线跳过翻译步骤."""
+
+    translate_fields: list[MetadataField] = Field(default_factory=lambda: [MetadataField.TITLE, MetadataField.PLOT])
+    """仅支持文本标量字段 (title/plot); 目标语言取自字段语言设置."""
+
+
 class HotSettings(BaseModel):
     """运行时可更新, 持久化到 TOML. extra=forbid, 未知字段须校验失败."""
 
@@ -784,9 +691,10 @@ class HotSettings(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def _drop_removed_sections(cls, data: Any) -> Any:
-        """丢弃已移除的 paths section."""
+        """丢弃已移除的 section (旧配置文件里可能还留着)."""
         if isinstance(data, dict):
-            data.pop("paths", None)
+            for removed in ("paths", "agent", "llm"):
+                data.pop(removed, None)
         return data
 
     @model_validator(mode="before")
@@ -825,17 +733,16 @@ class HotSettings(BaseModel):
 
     scraping: ScrapingConfig = ScrapingConfig()
     actor_scraping: ActorScrapingConfig = ActorScrapingConfig()
-    agent: AgentConfig = AgentConfig()
     network: NetworkConfig = NetworkConfig()
     sr: SrConfig = SrConfig()
     watermark: WatermarkConfig = WatermarkConfig()
-    llm: LLMConfig = LLMConfig()
     r18: R18Config = R18Config()
     watcher: WatcherConfig = WatcherConfig()
     worker: WorkerConfig = WorkerConfig()
     logging: LoggingConfig = LoggingConfig()
     notify: NotifyConfig = NotifyConfig()
     emby: EmbyConfig = EmbyConfig()
+    translate: TranslateConfig = TranslateConfig()
     plugins: dict[str, PluginConfig] = Field(default_factory=dict, json_schema_extra={"x-hidden": True})
 
 

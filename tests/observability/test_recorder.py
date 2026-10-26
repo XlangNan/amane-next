@@ -87,7 +87,7 @@ def test_recorder_omits_secrets_when_none(tmp_path: Path, task: Task):
     root = task_dir_for(tmp_path, 42)
     assert not (root / SECRETS_HOT_FILENAME).exists()
     cfg = json.loads((root / "config.hot.json").read_text())
-    assert set(cfg.keys()) == {"scraping", "network", "llm", "r18", "plugins"}
+    assert set(cfg.keys()) == {"scraping", "network", "r18", "plugins"}
 
 
 def test_recorder_success_discards_http_unless_debug(tmp_path: Path, task: Task):
@@ -130,7 +130,7 @@ def test_recorder_success_keeps_http_with_debug(tmp_path: Path, task: Task):
 
 def test_build_record_zip_redacted_by_default(tmp_path: Path, task: Task):
     hot = HotSettings()
-    hot.llm.api_key = "sk-secret"
+    hot.network.proxy = "http://user:pw@proxy.example:8080"
     rec = Recorder.begin(tmp_path, task, hot)
     task.status = TaskStatus.FAILED
     rec.finalize(task, success=False, error="boom", debug_capture=False)
@@ -140,14 +140,14 @@ def test_build_record_zip_redacted_by_default(tmp_path: Path, task: Task):
         names = zf.namelist()
         assert all(SECRETS_HOT_FILENAME not in n for n in names)
         cfg = json.loads(zf.read("task-42/config.hot.json"))
-        assert cfg["llm"]["api_key"] == "***"
+        assert "pw" not in cfg["network"]["proxy"]
         man = json.loads(zf.read("task-42/manifest.json"))
         assert man["redacted"] is True
 
 
 def test_build_record_zip_include_secrets(tmp_path: Path, task: Task):
     hot = HotSettings()
-    hot.llm.api_key = "sk-secret"
+    hot.network.proxy = "http://user:pw@proxy.example:8080"
     rec = Recorder.begin(tmp_path, task, hot)
     task.status = TaskStatus.FAILED
     rec.finalize(task, success=False, error="boom", debug_capture=False)
@@ -155,7 +155,7 @@ def test_build_record_zip_include_secrets(tmp_path: Path, task: Task):
     data = build_record_zip(tmp_path, 42, include_secrets=True)
     with zipfile.ZipFile(BytesIO(data)) as zf:
         cfg = json.loads(zf.read("task-42/config.hot.json"))
-        assert cfg["llm"]["api_key"] == "sk-secret"
+        assert cfg["network"]["proxy"] == "http://user:pw@proxy.example:8080"
         man = json.loads(zf.read("task-42/manifest.json"))
         assert man["redacted"] is False
 

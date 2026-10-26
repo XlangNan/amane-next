@@ -526,65 +526,6 @@ class TestContentRoutesFiltering:
         assert set(factory.requested) == {SiteName.JAVDB, SiteName.DMM}
 
 
-# --- 翻译集成测试 ---
-
-
-class TestScrapeTranslation:
-    @pytest.mark.asyncio(loop_scope="function")
-    async def test_translator_applied_to_title(self, repo: Repository, factory, resource_store):
-        """配置 translator + field_language 时, 标题被翻译后再持久化."""
-        from amane.enums import Language, MetadataField
-
-        class StubTranslator:
-            async def translate(self, text, target, field, *, use_cache=True):
-                return f"[{target}]{text}"
-
-        config = HotSettings()
-        config.scraping.field_language = {MetadataField.TITLE: Language.ZH_CN}
-        config.llm.translate_fields = [MetadataField.TITLE]
-        h = ScrapeHandler(
-            repo=repo,
-            factory=factory,
-            resource_store=resource_store,
-            pipeline_config=config,
-            translator=StubTranslator(),
-        )
-        media = await repo.create_media_file(library_id=1, path="/media/MIDV-123.mp4")
-        await h.handle(ScrapePayload(media_file_id=media.id, number="MIDV-123", content_type=ContentType.CENSORED))
-
-        metadata = await repo.get_metadata_by_number("MIDV-123")
-        assert metadata is not None
-        assert metadata.title == "[zh_cn]Mock Title"
-
-    @pytest.mark.asyncio(loop_scope="function")
-    async def test_translator_failure_keeps_original(self, repo: Repository, factory, resource_store):
-        """translator 抛异常时降级保留原值, 刮削不失败 (失败即跳过)."""
-        from amane.enums import Language, MetadataField
-
-        class BrokenTranslator:
-            async def translate(self, text, target, field, *, use_cache=True):
-                raise RuntimeError("llm down")
-
-        config = HotSettings()
-        config.scraping.field_language = {MetadataField.TITLE: Language.ZH_CN}
-        h = ScrapeHandler(
-            repo=repo,
-            factory=factory,
-            resource_store=resource_store,
-            pipeline_config=config,
-            translator=BrokenTranslator(),
-        )
-        media = await repo.create_media_file(library_id=1, path="/media/MIDV-123.mp4")
-        result = await h.handle(
-            ScrapePayload(media_file_id=media.id, number="MIDV-123", content_type=ContentType.CENSORED)
-        )
-
-        assert result.success is True
-        metadata = await repo.get_metadata_by_number("MIDV-123")
-        assert metadata is not None
-        assert metadata.title == "Mock Title"
-
-
 # --- RefreshHandler 测试 ---
 
 

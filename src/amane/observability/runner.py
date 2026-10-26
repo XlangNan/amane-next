@@ -54,7 +54,7 @@ async def run_record(record_path: Path, *, online: bool = False) -> int:
         hot = HotSettings.model_validate(hot_data)
         if manifest.redacted:
             print(  # noqa: T201
-                "warning: record is redacted; cookies/api tokens/llm keys are placeholders; "
+                "warning: record is redacted; cookies/api tokens/api keys are placeholders; "
                 "online replay may fail auth",
                 file=sys.stderr,
             )

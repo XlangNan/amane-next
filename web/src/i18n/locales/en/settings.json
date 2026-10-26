@@ -3,16 +3,15 @@
   "tabs": {
     "scraping": "Movie Scraping",
     "actor_scraping": "Actor Scraping",
-    "agent": "Agent",
     "network": "Network",
     "worker": "Task Engine",
     "watcher": "File Monitoring",
     "logging": "Logging",
     "sr": "Super Resolution",
-    "llm": "LLM Translation",
     "watermark": "Watermark",
     "notify": "Notifications",
-    "emby": "Emby"
+    "emby": "Emby",
+    "translate": "Translation"
   },
   "config": {
     "loadError": "Failed to load configuration"
@@ -599,143 +598,6 @@
         "description": "When on, record raw responses for every task; otherwise only failed ones"
       }
     },
-    "llm": {
-      "enabled": {
-        "label": "Enable LLM Translation",
-        "description": "Translate text fields during scrape"
-      },
-      "api_key": {
-        "label": "API Key",
-        "description": "Upstream service key; stored in the local config only"
-      },
-      "api_type": {
-        "label": "API Type",
-        "options": {
-          "chat": "Chat",
-          "response": "Responses",
-          "anthropic": "Anthropic"
-        }
-      },
-      "base_url": {
-        "label": "API Endpoint",
-        "description": "OpenAI-compatible API base URL"
-      },
-      "model": {
-        "label": "Model"
-      },
-      "rate_limit": {
-        "label": "Max requests per second"
-      },
-      "translate_fields": {
-        "label": "Fields to Translate",
-        "description": "Currently only title and plot are supported",
-        "$": {
-          "options": {
-            "title": "Title",
-            "actors": "Actors",
-            "tags": "Tags",
-            "release": "Release Date",
-            "runtime": "Runtime",
-            "directors": "Directors",
-            "series": "Series",
-            "studio": "Studio",
-            "publisher": "Publisher",
-            "plot": "Plot",
-            "poster_urls": "Poster",
-            "thumb_urls": "Cover",
-            "trailer_urls": "Trailer",
-            "extrafanart": "Stills",
-            "score": "Score"
-          }
-        }
-      },
-      "system_prompt": {
-        "label": "System Prompt"
-      },
-      "field_prompts": {
-        "label": "Field Prompts",
-        "$": {
-          "label": "Prompt"
-        },
-        "options": {
-          "title": "Title",
-          "actors": "Actors",
-          "tags": "Tags",
-          "release": "Release Date",
-          "runtime": "Runtime",
-          "directors": "Directors",
-          "series": "Series",
-          "studio": "Studio",
-          "publisher": "Publisher",
-          "plot": "Plot",
-          "poster_urls": "Poster",
-          "thumb_urls": "Cover",
-          "trailer_urls": "Trailer",
-          "extrafanart": "Stills",
-          "score": "Score"
-        }
-      }
-    },
-    "agent": {
-      "api_type": {
-        "label": "API Type",
-        "description": "Prefer Responses or Anthropic when the provider supports them",
-        "options": {
-          "chat": "Chat",
-          "response": "Responses",
-          "anthropic": "Anthropic"
-        }
-      },
-      "api_key": {
-        "label": "API Key"
-      },
-      "base_url": {
-        "label": "API Endpoint"
-      },
-      "model": {
-        "label": "Model"
-      },
-      "thinking": {
-        "label": "Default Thinking Level",
-        "description": "Can be changed in chat",
-        "options": {
-          "off": "Off",
-          "minimal": "Minimal",
-          "low": "Low",
-          "medium": "Medium",
-          "high": "High",
-          "xhigh": "Max"
-        }
-      },
-      "max_tokens": {
-        "label": "Max output tokens",
-        "description": "Per-reply output cap. The provider rejects values above the model's limit"
-      },
-      "rate_limit": {
-        "label": "Max requests per second",
-        "description": "See the provider's docs; too high may trigger rate limiting"
-      },
-      "sql_timeout_ms": {
-        "label": "Query timeout (ms)",
-        "description": "Default timeout for queries that run without approval; queries that exceed it need user approval"
-      },
-      "result_cache_ttl_s": {
-        "label": "Result cache duration (s)",
-        "description": "In-memory lifetime of delivered results; expired entries are re-run"
-      },
-      "result_cache_max_entries": {
-        "label": "Result Cache Capacity",
-        "description": "Max in-memory result entries (LRU)"
-      },
-      "history_ttl_s": {
-        "label": "Session history memory duration (s)",
-        "description": "In-memory lifetime of session history; reloaded from disk on demand after eviction"
-      },
-      "history_max_sessions": {
-        "label": "Session History Capacity",
-        "description": "Max sessions kept in the history hot cache (LRU)"
-      }
-    },
     "r18": {
       "dsn": {
         "label": "PostgreSQL DSN",
@@ -903,6 +765,35 @@
       "use_proxy": {
         "label": "Use proxy",
         "description": "Go through the global proxy in Network; Emby is usually on the LAN, so leave this off"
+      }
+    },
+    "translate": {
+      "enabled": {
+        "label": "Enable translation",
+        "description": "Translate title / plot into the field language with Google's free translate endpoint; no key needed, uses the global proxy from Network. Original text is kept on failure"
+      },
+      "translate_fields": {
+        "label": "Fields to translate",
+        "description": "Fields to translate; the target language comes from each field's language setting",
+        "$": {
+          "options": {
+            "title": "Title",
+            "actors": "Actors",
+            "tags": "Tags",
+            "release": "Release Date",
+            "runtime": "Runtime",
+            "directors": "Directors",
+            "series": "Series",
+            "studio": "Studio",
+            "publisher": "Publisher",
+            "plot": "Plot",
+            "poster_urls": "Poster",
+            "thumb_urls": "Cover",
+            "trailer_urls": "Trailer",
+            "extrafanart": "Stills",
+            "score": "Score"
+          }
+        }
       }
     }
   },

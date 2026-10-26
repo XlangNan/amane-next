@@ -5,7 +5,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import TypeAdapter
 
 from ...aggregate import compute_merge_updates
-from ...db.models import MetadataSortField, SavedQueryEntity, SortOrder, TaskType
+from ...db.models import MetadataSortField, SortOrder, TaskType
 from ...db.repo_types import WriteMode
 from ...db.repos.media import file_phase_of
 from ...handlers import ScrapePayload
@@ -34,7 +34,6 @@ from ..models import (
     UserTagResponse,
     to_media_file_response,
 )
-from .saved_queries import resolve_saved_query_id_subquery
 
 if TYPE_CHECKING:
     from ...db.repo_types import MetadataFields
@@ -91,14 +90,8 @@ async def list_metadata(
     ] = None,
     definition: Annotated[str | None, Query(description="Filter by linked file definition (8K/4K/1080p/…)")] = None,
     content_type: Annotated[ContentType | None, Query(description="Filter by number content type")] = None,
-    saved_query_id: Annotated[
-        int | None, Query(description="Saved query preset id; AND with other filters via SQL subquery")
-    ] = None,
 ) -> MetadataListResponse:
     definition = _require_known_definition(definition)
-    id_subquery_sql = None
-    if saved_query_id is not None:
-        id_subquery_sql = await resolve_saved_query_id_subquery(repo, saved_query_id, SavedQueryEntity.METADATA)
     items, total = await repo.list_metadata(
         keyword=search,
         offset=offset,
@@ -119,7 +112,6 @@ async def list_metadata(
         uncensored=uncensored,
         definition=definition,
         content_type=content_type,
-        id_subquery_sql=id_subquery_sql,
     )
     summaries = await repo.summarize_media_by_metadata(items)
     responses: list[MetadataResponse] = []

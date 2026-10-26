@@ -5,7 +5,7 @@ from typing import Annotated, cast
 import structlog
 from fastapi import APIRouter, HTTPException, Query
 
-from ...db.models import Actor, FacetKind, SavedQueryEntity, TaskType
+from ...db.models import Actor, FacetKind, TaskType
 from ...db.repo_types import ActorBrowseItem, ActorBrowseParams, ActorPersonFields, WriteMode
 from ...handlers import ActorScrapePayload
 from ...media import manual_crop_image
@@ -29,7 +29,6 @@ from ..models import (
     UserTagResponse,
 )
 from ..models.actors import normalize_actor_locks
-from .saved_queries import resolve_saved_query_id_subquery
 
 logger = structlog.get_logger()
 
@@ -106,10 +105,7 @@ async def _detail_response(repo: RepoDep, actor: Actor) -> ActorResponse:
 
 @router.get("")
 async def list_actors(repo: RepoDep, params: Annotated[ActorBrowseParams, Query()]) -> ActorListResponse:
-    id_subquery_sql = None
-    if params.saved_query_id is not None:
-        id_subquery_sql = await resolve_saved_query_id_subquery(repo, params.saved_query_id, SavedQueryEntity.ACTOR)
-    items, total = await repo.browse_actors(params, id_subquery_sql=id_subquery_sql)
+    items, total = await repo.browse_actors(params)
     return ActorListResponse(items=[_from_browse(i) for i in items], total=total)
 
 

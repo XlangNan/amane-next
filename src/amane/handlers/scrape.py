@@ -12,6 +12,7 @@ from ..media import materialize_images
 from ..observability import current
 from ..observability.models import SiteOutcomeKind
 from ..plugins.models import SourceDescriptor, SourceTrait
+from ..translate import GoogleTranslator
 from ._common import ensure_oshash, finalize_media_file
 from .models import ActorScrapePayload, CacheKind, OrganizePayload, ScrapePayload, ScrapeResult
 from .protocol import FollowupTask, TaskHandler, TaskResult
@@ -20,7 +21,6 @@ if TYPE_CHECKING:
     from ..config import HotSettings
     from ..db.models import MediaFile
     from ..db.repository import Repository
-    from ..llm import Translator
     from ..media import ResourceStore
     from ..net.http import WebClient
 
@@ -42,7 +42,6 @@ class ScrapeHandler(TaskHandler[ScrapePayload, ScrapeResult]):
         resource_store: ResourceStore,
         pipeline_config: HotSettings,
         web_client: WebClient | None = None,
-        translator: Translator | None = None,
         source_catalog: Sequence[SourceDescriptor] | None = None,
     ):
         super().__init__(payload_t=ScrapePayload, result_t=ScrapeResult)
@@ -50,8 +49,8 @@ class ScrapeHandler(TaskHandler[ScrapePayload, ScrapeResult]):
         self._factory = factory
         self._config = pipeline_config
         self._web_client = web_client
+        self._translator = GoogleTranslator(web_client) if web_client is not None else None
         self._resource_store = resource_store
-        self._translator = translator
         # 调度事实只从来源目录读取: 内置来源的 descriptor 由 profile() 合成, 插件来源由插件声明.
         catalog = source_catalog if source_catalog is not None else builtin_descriptors()
         self._multi_language_sources = frozenset(d.id for d in catalog if SourceTrait.MULTI_LANGUAGE in d.traits)
@@ -140,12 +139,11 @@ class ScrapeHandler(TaskHandler[ScrapePayload, ScrapeResult]):
                 ),
             )
 
+        if self._translator is not None and self._config.translate.enabled:
+            await self._translate_metadata(result.metadata, field_language)
+
         # 获取结束: 进度分子对齐标量字段数, 其后为物化与持久化.
         await self.report_progress(len(SCALAR_FIELDS), progress_total, "fetch")
-
-        # 翻译文本字段; 失败不阻断刮削.
-        if self._translator is not None:
-            await self._translate_metadata(result.metadata, field_language, CacheKind.trans in payload.use_cache)
 
         # 物化到 Resource; 失败保留原始 URL.
         poster_out = result.metadata.poster_urls
@@ -301,36 +299,28 @@ class ScrapeHandler(TaskHandler[ScrapePayload, ScrapeResult]):
             current().warning("failed to build actor scrape followups", actors=actor_names)
             return []
 
-    async def _translate_metadata(
-        self, metadata: AggregatedMetadata, field_language: FieldLanguage, use_cache: bool
-    ) -> None:
-        """就地翻译 ``llm.translate_fields`` 中的文本标量. 单字段失败不影响其余, 全程不抛.
-        ``use_cache`` 为 False 时跳过译文缓存读取, 但仍刷新缓存.
-        """
+    async def _translate_metadata(self, metadata: AggregatedMetadata, field_language: FieldLanguage) -> None:
+        """就地翻译 ``translate.translate_fields`` 中的文本标量. 单字段失败不影响其余, 全程不抛."""
         assert self._translator is not None
-        fields = self._config.llm.translate_fields
+        fields = self._config.translate.translate_fields
         if MetadataField.TITLE in fields and metadata.title:
-            translated = await self._translate_field(metadata.title, field_language, MetadataField.TITLE, use_cache)
+            translated = await self._translate_field(metadata.title, field_language, MetadataField.TITLE)
             if translated:
                 metadata.title = translated
         if MetadataField.PLOT in fields and metadata.plot:
-            translated = await self._translate_field(metadata.plot, field_language, MetadataField.PLOT, use_cache)
+            translated = await self._translate_field(metadata.plot, field_language, MetadataField.PLOT)
             if translated:
                 metadata.plot = translated
 
-    async def _translate_field(
-        self, value: str, field_language: FieldLanguage, field: MetadataField, use_cache: bool
-    ) -> str | None:
-        """翻译单字段; 异常忽略. 无目标语言或失败时返回 None."""
+    async def _translate_field(self, value: str, field_language: FieldLanguage, field: MetadataField) -> str | None:
+        """翻译单字段; 无目标语言或失败时返回 None."""
         assert self._translator is not None
         target = field_language.get(field)
         if target is None:
             return None
-        try:
-            result = await self._translator.translate(value, target, field, use_cache=use_cache)
-        except Exception as e:
-            current().warning("translation failed, keeping original", field=str(field), error=str(e))
-            return None
+        result = await self._translator.translate(value, target)
         if result:
             current().debug("field translated", field=str(field), target=str(target))
+        else:
+            current().debug("field not translated", field=str(field), target=str(target))
         return result

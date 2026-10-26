@@ -5,7 +5,7 @@
 - 日文句子必然含假名 (助词 は/が/を/の 或送假名), 故"含假名"足以判定日文;
   纯汉字写法只出现在词级 (标签/人名), 不在适用范围内.
 - 中文简繁是字形差异而非语言差异, 大量字简繁同形, 无法也无需在此区分:
-  中文内部互转由 zhconv 完成 (幂等), 不经 LLM. 见 amane/llm.
+  中文内部互转由 zhconv 完成 (幂等), 不经在线翻译. 见 amane/translate.
 """
 
 import re
@@ -31,10 +31,10 @@ def is_ascii_only(s: str) -> bool:
     return bool(ASCII_ONLY.match(s))
 
 
-def needs_llm_translation(s: str, target: Language) -> bool:
-    """文本译至 ``target`` 是否需要 LLM (跨语系).
+def needs_translation(s: str, target: Language) -> bool:
+    """文本译至 ``target`` 是否需要在线翻译 (跨语系).
 
-    仅日↔中/英, 英↔中/日 等跨语系才需 LLM. 中文文本 (含简繁互转, 共用字)
+    仅日↔中/英, 英↔中/日 等跨语系才需在线翻译. 中文文本 (含简繁互转, 共用字)
     一律返回 ``False`` -- 交由 zhconv 处理或本就无需变更.
     """
     if not s:
@@ -43,5 +43,5 @@ def needs_llm_translation(s: str, target: Language) -> bool:
         return target != Language.JP
     if is_ascii_only(s):
         return target != Language.EN
-    # 其余视为中文 (含日文纯汉字这一极少数边角): 中文内部变体由 zhconv 处理, 不经 LLM.
+    # 其余视为中文 (含日文纯汉字这一极少数边角): 中文内部变体由 zhconv 处理, 不经在线翻译.
     return False

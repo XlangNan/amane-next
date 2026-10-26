@@ -1,4 +1,8 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { AgentHome } from "@/components/agent/agent-home";
+import { createFileRoute, redirect } from "@tanstack/react-router";
 
-export const Route = createFileRoute("/")({ component: AgentHome });
+export const Route = createFileRoute("/")({
+  beforeLoad: () => {
+    // eslint-disable-next-line @typescript-eslint/only-throw-error
+    throw redirect({ to: "/meta" });
+  },
+});

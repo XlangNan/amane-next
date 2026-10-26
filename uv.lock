@@ -66,7 +66,7 @@ wheels = [
 
 [[package]]
 name = "amane"
-version = "0.23.0"
+version = "0.24.0"
 source = { editable = "." }
 dependencies = [
     { name = "aiofiles" },
@@ -82,7 +82,6 @@ dependencies = [
     { name = "packaging" },
     { name = "parsel" },
     { name = "pillow" },
-    { name = "pydantic-ai-slim", extra = ["ag-ui", "anthropic", "openai"] },
     { name = "pydantic-settings" },
     { name = "python-multipart" },
     { name = "sqlalchemy", extra = ["asyncio"] },
@@ -136,7 +135,6 @@ requires-dist = [
     { name = "parsel", specifier = ">=1.11.0" },
     { name = "patchright", marker = "extra == 'browser'", specifier = ">=1.59.1" },
     { name = "pillow", specifier = ">=12.2.0" },
-    { name = "pydantic-ai-slim", extras = ["ag-ui", "anthropic", "openai"], specifier = ">=2.27.0" },
     { name = "pydantic-settings", specifier = ">=2.14.1" },
     { name = "python-multipart", specifier = ">=0.0.32" },
     { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0.51" },

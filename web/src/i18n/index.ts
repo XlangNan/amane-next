@@ -9,7 +9,6 @@ import i18n from "i18next";
 import LanguageDetector from "i18next-browser-languagedetector";
 import { initReactI18next } from "react-i18next";
 // English namespaces
-import enAgent from "./locales/en/agent.json";
 import enCommon from "./locales/en/common.json";
 import enNetworkCheck from "./locales/en/networkCheck.json";
 import enFeeds from "./locales/en/feeds.json";
@@ -18,12 +17,10 @@ import enLibrary from "./locales/en/library.json";
 import enLogs from "./locales/en/logs.json";
 import enMetadata from "./locales/en/metadata.json";
 import enPlugins from "./locales/en/plugins.json";
-import enSavedQueries from "./locales/en/savedQueries.json";
 import enSchedules from "./locales/en/schedules.json";
 import enSettings from "./locales/en/settings.json";
 import enTasks from "./locales/en/tasks.json";
 // Chinese (Simplified) namespaces - source language
-import zhCNAgent from "./locales/zh-CN/agent.json";
 import zhCNCommon from "./locales/zh-CN/common.json";
 import zhCNNetworkCheck from "./locales/zh-CN/networkCheck.json";
 import zhCNFeeds from "./locales/zh-CN/feeds.json";
@@ -32,7 +29,6 @@ import zhCNLibrary from "./locales/zh-CN/library.json";
 import zhCNLogs from "./locales/zh-CN/logs.json";
 import zhCNMetadata from "./locales/zh-CN/metadata.json";
 import zhCNPlugins from "./locales/zh-CN/plugins.json";
-import zhCNSavedQueries from "./locales/zh-CN/savedQueries.json";
 import zhCNSchedules from "./locales/zh-CN/schedules.json";
 import zhCNSettings from "./locales/zh-CN/settings.json";
 import zhCNTasks from "./locales/zh-CN/tasks.json";
@@ -52,9 +48,7 @@ export const resources = {
     tasks: zhCNTasks,
     settings: zhCNSettings,
     schedules: zhCNSchedules,
-    savedQueries: zhCNSavedQueries,
     logs: zhCNLogs,
-    agent: zhCNAgent,
   },
   en: {
     common: enCommon,
@@ -67,9 +61,7 @@ export const resources = {
     tasks: enTasks,
     settings: enSettings,
     schedules: enSchedules,
-    savedQueries: enSavedQueries,
     logs: enLogs,
-    agent: enAgent,
   },
 } as const;
 

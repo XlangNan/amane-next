@@ -1,7 +1,7 @@
 import pytest
 
 from amane.enums import Language
-from amane.utils.language import has_kana, is_ascii_only, needs_llm_translation
+from amane.utils.language import has_kana, is_ascii_only, needs_translation
 
 
 @pytest.mark.parametrize(
@@ -62,5 +62,5 @@ def test_is_ascii_only(s, expected):
         ("123-456", Language.EN, False),
     ],
 )
-def test_needs_llm_translation(s, target, expected):
-    assert needs_llm_translation(s, target) == expected
+def test_needs_translation(s, target, expected):
+    assert needs_translation(s, target) == expected

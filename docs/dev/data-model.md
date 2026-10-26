@@ -66,7 +66,7 @@ Metadata 列表与 `/media` 文件行的角标与筛选: 有码 / 无码取条�
 写入策略由 `WriteMode` 表达, repository 默认 `AUTO` (自动写入者漏传策略时只会未加锁, 不会误加锁; 手动调用点显式传 `MANUAL`):
 
 - `AUTO`: 跳过锁定列并保留其既有值与既有 `field_sources`; `raw` 始终更新, 只更新 `raw` 也刷新 `updated_at`, 因此全锁条目仍参与 RESCRAPE 的年龄选择. 写入位置: 影片 `upsert_metadata` (`ScrapeHandler`); 演员 `save_actor` (ACTOR_SCRAPE) 与 `clean_actor_names` 的 `Actor.gender` 填空与别名行写入.
-- `MANUAL`: 无视锁, 并把本次写入的可锁字段并入 `locked_fields`. 写入位置: 两端 REST PATCH / merge / crop 与 Agent 工具.
+- `MANUAL`: 无视锁, 并把本次写入的可锁字段并入 `locked_fields`. 写入位置: 两端 REST PATCH / merge / crop.
 - `set_metadata_locks` / `set_actor_locks` 整体替换锁集合; 锁集合本身的变更不刷新 `updated_at`.
 - 演员 `clear_actor_person` (REST `POST /actors/batch/clear-person`) 清空档案 + `field_sources` + 锁 + `raw`, 保留 `name` / `gender`: 旧快照留着会在下次刮削被原样写回; 而 `raw` 非空是链式自动刮削的跳过判据, 清空后该演员重新入队, 代价是下次刮削全站重取.
 - 分类治理与实体 rename / delete 不读锁, 也不自动上锁 (用户显式操作); 演员实体 merge 例外: 源锁集并入 target, 而填空并入的未锁字段不额外上锁.

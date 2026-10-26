@@ -32,7 +32,6 @@ from ..handlers import (
     UpscaleHandler,
 )
 from ..library import InventoryStore
-from ..llm import TranslationCache, build_translator
 from ..media.watermarks import user_watermark_dir
 from ..net.browser import BrowserPool
 from ..net.http import RateLimiters, WebClient, site_proxy_overrides
@@ -44,7 +43,6 @@ from ..scheduler.worker import MAIN_LOOP_STOP_TIMEOUT, AsyncWorker
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from ..agent import AgentService
     from ..config import BrowserConfig, ConfigManager, HotSettings
     from ..db.repository import Repository
     from ..emby import EmbyActorSync
@@ -217,9 +215,7 @@ class AppRuntime:
     feed_service: FeedService | None = None
     safe_dirs: list[Path] | None = field(default_factory=list)
     api_token: str | None = None
-    translation_cache: TranslationCache | None = None
     r18_db: R18Database | None = None
-    agent_service: AgentService | None = None
     plugin_manager: PluginManager | None = None
     playback_factory: PlaybackFactory | None = None
     playback_state: PlaybackState = field(default_factory=PlaybackState)
@@ -296,7 +292,6 @@ class AppRuntime:
                 self.resource_store,
                 hot,
                 self.safe_dirs,
-                self.translation_cache,
                 self.config.cold.data_dir,
                 self.plugin_manager,
                 library_locks=self.library_locks,
@@ -310,9 +305,6 @@ class AppRuntime:
             get_hot=lambda: self.config.hot,
         )
         self.worker.set_paused(paused)
-
-        if self.agent_service is not None:
-            self.agent_service.rebuild(hot.agent)
 
         previous_playback = self.playback_factory
         # 新的 Factory 构造时丢弃解析结果缓存 (配置改动可能更换凭据); token 表与探测缓存仍在
@@ -500,27 +492,11 @@ def build_handlers(
     resource_store: ResourceStore,
     hot: HotSettings,
     safe_dirs: Sequence[Path] | None = (),
-    translation_cache: TranslationCache | None = None,
     state_dir: Path | None = None,
     plugin_manager: PluginManager | None = None,
     library_locks: LibraryTaskLocks | None = None,
     inventory_store: InventoryStore | None = None,
 ) -> dict[TaskType, TaskHandler[Any, Any]]:
-    # 未启用/缺密钥时 translator 为 None, ScrapeHandler 跳过翻译.
-    # 经 _rebuild() 热重载; 代理沿用 network.proxy.
-    # 译文缓存是会话级, 热重载时复用同一实例.
-    translator = build_translator(
-        enabled=hot.llm.enabled,
-        api_type=hot.llm.api_type,
-        api_key=hot.llm.api_key,
-        base_url=hot.llm.base_url,
-        model=hot.llm.model,
-        rate_limit=hot.llm.rate_limit,
-        proxy=hot.network.proxy,
-        system_prompt=hot.llm.system_prompt,
-        field_prompts=hot.llm.field_prompts,
-        cache=translation_cache,
-    )
     if library_locks is None:
         library_locks = LibraryTaskLocks()
     # 缺省自建只服务精简构造 (测试); 生产必须传入 AppRuntime 的那一份, 否则扫描写进的清单
@@ -535,8 +511,7 @@ def build_handlers(
             resource_store,
             hot,
             web_client,
-            translator,
-            plugin_manager.descriptors() if plugin_manager is not None else None,
+            source_catalog=plugin_manager.descriptors() if plugin_manager is not None else None,
         ),
         TaskType.ACTOR_SCRAPE: ActorScrapeHandler(repo, factory, resource_store, hot, web_client),
         TaskType.ORGANIZE: OrganizeHandler(

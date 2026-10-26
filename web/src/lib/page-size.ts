@@ -8,7 +8,6 @@ export const PAGE_SIZE_OPTIONS = {
   feedItems: [20, 50, 100, 200],
   feedSources: [20, 50, 100, 200],
   tasks: [20, 50, 100, 200],
-  savedQuery: [20, 50, 100, 200],
 } as const;
 
 export type PageSizeKey = keyof typeof PAGE_SIZE_OPTIONS;
@@ -24,7 +23,6 @@ export const DEFAULT_PAGE_SIZES = {
   feedItems: 50,
   feedSources: 50,
   tasks: 50,
-  savedQuery: 50,
 } as const satisfies { [K in PageSizeKey]: (typeof PAGE_SIZE_OPTIONS)[K][number] };
 
 export function clampPageSize(key: PageSizeKey, value: number): PageSize {

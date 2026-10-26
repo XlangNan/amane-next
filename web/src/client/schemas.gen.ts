@@ -3288,21 +3288,6 @@ export const HotSettingsSchema = {
                 gfriends_repo: 'https://github.com/gfriends/gfriends'
             }
         },
-        agent: {
-            $ref: '#/components/schemas/AgentConfig',
-            default: {
-                api_type: 'response',
-                base_url: 'https://api.openai.com/v1',
-                model: 'gpt-4o-mini',
-                max_tokens: 128000,
-                rate_limit: 2,
-                sql_timeout_ms: 1000,
-                result_cache_ttl_s: 3600,
-                result_cache_max_entries: 64,
-                history_ttl_s: 3600,
-                history_max_sessions: 32
-            }
-        },
         network: {
             $ref: '#/components/schemas/NetworkConfig',
             default: {
@@ -3344,21 +3329,6 @@ export const HotSettingsSchema = {
                     subtitle: 'top_left',
                     uncensored: 'top_left'
                 }
-            }
-        },
-        llm: {
-            $ref: '#/components/schemas/LLMConfig',
-            default: {
-                enabled: false,
-                translate_fields: [
-                    'title',
-                    'plot'
-                ],
-                field_prompts: {},
-                api_type: 'chat',
-                base_url: 'https://api.openai.com/v1',
-                model: '',
-                rate_limit: 2
             }
         },
         r18: {

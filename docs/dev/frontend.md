@@ -8,14 +8,11 @@
 
 | 域 | 路由 | 页面文件 | 主要协作文件 |
 |----|------|---------|-------------|
-| **Browse** | `/` | `routes/index.tsx` | `components/agent/` (`agent-home.tsx` 为对话主体), `lib/agent/` |
 | **Browse** | `/meta` | `routes/meta.tsx` + `meta.index.tsx` | `components/media/` (`poster-grid` / `meta-table` / `facet-filter-controls`), `lib/media/browse.ts` |
 | **Browse** | `/meta/$metadataId` | `routes/meta.$metadataId.tsx` | `components/media/playback-panel.tsx` → `playback-player.tsx`, `comment-section.tsx` → `comment-body.tsx`, `lib/media/comment-segments.ts`, `lib/media/metadata-fields.ts`, `components/media/field-lock.tsx` |
 | **Browse** | `/actors` | `routes/actors.tsx` + `actors.index.tsx` | `components/media/actor-grid.tsx` / `actor-table.tsx`, `lib/actors/browse.ts` |
 | **Browse** | `/actors/$actorId` | `routes/actors.$actorId.tsx` | `components/media/actor-card.tsx` / `actor-edit-dialog.tsx` / `field-lock.tsx`, `lib/actors/fields.ts`, `hooks/use-facet-identity-actions.ts` |
 | **Browse** | `/catalog/...` | `routes/catalog.tsx` + `catalog.index.tsx` + `catalog.$kind.tsx` + `catalog.$kind_.$facetId.tsx` | `components/media/catalog-facet-table.tsx`, `facet-rules-panel.tsx` |
-| **Browse** | `/saved-queries` | `routes/saved-queries.index.tsx` | `components/saved-query/`, `lib/saved-query/` |
-| **Browse** | `/saved-queries/$queryId` | `routes/saved-queries.$queryId.tsx` | `components/saved-query/`, `lib/saved-query/` |
 | **Browse** | `/feeds` | `routes/feeds.tsx` + `feeds.index.tsx` | `components/feeds/feed-reader.tsx` / `feed-sidebar.tsx`, `lib/feeds/` |
 | **Manage** | `/libraries` | `routes/libraries.tsx` + `libraries.index.tsx` | `components/library/library-form.tsx` |
 | **Manage** | `/libraries/$libraryId` | `routes/libraries.$libraryId.tsx` | `components/library/` (文件表与扫描 / 整理入口) |
@@ -29,7 +26,6 @@
 
 路由由 `@tanstack/router-vite-plugin` 从 `routes/` 生成 (`routeTree.gen.ts` 不手改): 文件名的点号即路径层级, 需要独立 URL 又共享布局的一层写成 `xxx.tsx` + `xxx.index.tsx`, 叶页与父级同段时用尾随 `_`. `tanstackRouter()` 必须排在 JSX 转换插件之前, 顺序颠倒时构建失败.
 
-片库 / 演员 / 分类无独立「管理」路由, list 视图才有多选与破坏性操作; 多选批量一律走批量端点 (一次请求一次落库, 不逐条发请求), 单行按钮复用同一入口. Feed 相反, 阅读器与源表不共用布局. 查询预设是管理页例外: `/saved-queries` 只列已保留的预设, 全选与批量操作作用于过滤后的可见集合; 会话内的临时预设只在会话页的预设面板查看. 侧栏「全部 / 未分组」不经深链进入. `/feeds` 的选中态必须 `activeOptions.exact` 且忽略 search, 否则打开 `/feeds/sources` 时「订阅」也会亮.
 
 **列表默认**: 侧栏「片库 / 演员 / 订阅」按钮携带 `lib/nav-defaults.ts` 白名单内的默认列表参数 (排序、筛选、视图; 存于 ui store), 点击时经路由跳转整体替换 search, 因此 URL 仍是列表态的唯一事实来源 —— 页面内清除的筛选不会被默认重新写入. Mantine 的多态 props 把 `component={Link}` 的 `search` 收窄成 `never`, 参数只能这样送入; 中键与修饰键保留浏览器行为, 打开的地址因此不带默认参数.
 
@@ -66,12 +62,6 @@
 Settings、任务提交、定时创建、metadata 编辑共用 `components/schema-form/`: Pydantic → OpenAPI → FieldRouter; `x-*` 清单见 `schema/types.ts`, 字段控件细节见该目录与字段注释.
 
 `SchemaForm` 双模式 `patch` (dirty 门控, 只提交 diff) / `create` (完整值); dirty 保存条用 `affix` 固定于视口底, 编辑弹窗里必须抬到 Modal 之上. 空值编码统一经 `schema-form/encode.ts` (按 Create / 列 schema 判空), `x-frozen-keys` 必须保留全部 key; 不允许对着 PATCH partial schema 编码, 手写 Library / Feed 表单经同一个编码器出 body. 任务与定时提交用 `DiscriminatedSchemaForm`; 短枚举共用 `EnumToggle`, 定时 cron 用 `CronPicker` (产出 5-field, 与后端 croniter 一致).
-
-## 对话通道
-
-`/` 的实现边界见 [agent.md](agent.md). 前端四点: 对话经 AG-UI (`@ag-ui/client` + `@assistant-ui/react-ag-ui`), 不经 hey-api 也不经 `/ws`, 且 `@ag-ui/client` 必须停留在 0.0.x —— react-ag-ui 的 peer 依赖为 `^0.0.59`, 1.x 调整了 `Message` 内容部件的类型, 与之不兼容; 请求统一经由 `lib/api-token.ts` 的 `apiFetch` (纯透传, 只把 401 转成登录门); 读 assistant-ui 线程状态的 hook (`useAuiState` / `useAgUi*`) 须在 `AssistantRuntimeProvider` 之内 — 持有 provider 的那个组件读不到, 要另起子组件; 展示只认回放行 — `lib/agent/trace.ts::foldTrace` 的产物直接渲染, 本页发起的回合也跟随 `.../agui/events` (从 `after_seq` 接上, 回合未收尾时重开), 运行时的消息虽同步同一份 fold 但不参与渲染, 因此直播与刷新同形, 决不允许另建一份消息状态.
-
-渲染侧的流式提示按「回合是否在跑」推导, 不来自部件状态: 末段正文带光标, 未拿到回执的工具卡片显示转圈, 思考折叠块同理. 用量与回合总计都是该轮消息里的部件, 保留在各轮轮末.
 
 ## 实时与状态
 

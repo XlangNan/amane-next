@@ -29,9 +29,7 @@ Amane 的配置分为两层:
 data/
 ├── amane.db          SQLite 数据库
 ├── token             API Token (自动生成)
-├── translations.db   LLM 翻译缓存
 ├── resources/        下载的图片、预告片等资源
-├── agent/            AI 助理会话数据
 ├── plugins/          已安装的插件
 ├── tools/            超分工具二进制
 └── watermarks/       可选: 自定义水印 PNG (见下方)
@@ -85,23 +83,11 @@ data/
 - **防抖窗口**: 文件变动后等待的时间, 避免重复触发; CD2 webhook 目录 create 后的子树扫描也使用该窗口
 - **媒体扩展名**: 监控的文件类型白名单
 
-### AI 助理 (`agent`)
+### 翻译 (`translate`)
 
-- **API 类型**: 支持 OpenAI Chat / OpenAI Response / Anthropic
-- **API 密钥**: 对应提供商的密钥
-- **模型**: 使用的模型名称
-- **思考强度**: 推理深度 (off / minimal / low / medium / high / xhigh)
-
-### LLM 翻译 (`llm`)
-
-- **启用**: 是否启用 LLM 翻译
-- **翻译字段**: 需要翻译的字段 (title / plot)
-- **API 类型**: 支持 OpenAI Chat / OpenAI Response / Anthropic
-- **API 配置**: 端点和密钥
-- **自定义提示词**: 替换内置系统提示词的指令部分; 留空使用内置
-- **字段提示词**: 逐字段覆盖内置字段说明; 留空使用内置
-
-自定义提示词与字段提示词均可用 `{target_lang}` 引用目标语言名 (简体中文 / 繁體中文 / 日本語 / English). 单条上限 2000 字符. 提示词变化后缓存的旧译文自动失效, 详见 [刮削指南](scraping.md).
+- **启用**: 刮削时用谷歌免费翻译把标题 / 简介译成目标语言, 无需密钥
+- **翻译字段**: title / plot; 目标语言取自刮削设置里各字段的语言
+- 经「网络」里的全局代理访问, 国内一般需要代理; 失败时保留原文. 中文简繁互转在本地完成, 不联网
 
 ### 图像超分 (`sr`)
 
