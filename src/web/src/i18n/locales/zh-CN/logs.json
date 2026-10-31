@@ -1,0 +1,20 @@
+{
+  "title": "日志",
+  "empty": "暂无日志",
+  "noMatch": "没有匹配的日志条目",
+  "searchPlaceholder": "level:ERROR AND source:worker",
+  "levels": {
+    "debug": "调试",
+    "info": "信息",
+    "warn": "警告",
+    "error": "错误",
+    "critical": "严重"
+  },
+  "actions": {
+    "autoScroll": "自动滚动",
+    "clear": "清空"
+  },
+  "queryHelp": {
+    "fallback": "纯文本输入将回退为模糊搜索"
+  }
+}

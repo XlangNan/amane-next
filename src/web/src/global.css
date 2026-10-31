@@ -1,0 +1,17 @@
+/*
+  视口高度单位: 默认 vh, 支持 dvh 的引擎由 main.tsx 在入口替换成 dvh.
+  自己的代码一律取该变量; 取值理由与第三方样式的兜底见 docs/dev/frontend.md.
+*/
+:root {
+  --amane-vh: 100vh;
+}
+
+/*
+  壳内声明本页自己渲染深浅两套, 使内核不再叠加算法深色 (来由见 docs/dev/android.md).
+  桌面浏览器没有这层叠加, 保留 Mantine 按主题给的用色方案.
+*/
+@media (prefers-color-scheme: dark) {
+  html[data-amane-shell] {
+    color-scheme: dark;
+  }
+}

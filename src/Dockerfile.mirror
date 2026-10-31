@@ -1,0 +1,39 @@
+FROM node:26-slim AS web-builder
+WORKDIR /app/web
+ENV npm_config_registry=https://registry.npmmirror.com
+RUN npm install -g pnpm@11
+COPY web/package.json web/pnpm-lock.yaml web/pnpm-workspace.yaml ./
+RUN pnpm install --frozen-lockfile
+COPY web/ .
+RUN pnpm build
+
+FROM python:3.14-slim AS base
+WORKDIR /app
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
+ENV UV_DEFAULT_INDEX=https://pypi.tuna.tsinghua.edu.cn/simple
+# 依赖层只依赖 pyproject.toml 与 uv.lock: 改源码不会重装依赖, 重新构建只要几秒.
+COPY pyproject.toml uv.lock ./
+RUN touch README.md \
+ && uv export --frozen --no-dev --no-hashes --no-header --no-emit-project -o /tmp/req.txt \
+ && uv venv /app/.venv \
+ && uv pip install --python /app/.venv/bin/python -r /tmp/req.txt
+COPY README.md ./
+COPY src ./src
+RUN uv pip install --python /app/.venv/bin/python --no-deps .
+
+FROM base
+RUN sed -i 's|deb.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list.d/debian.sources 2>/dev/null || true
+RUN apt-get update && apt-get install -y --no-install-recommends libgomp1 postgresql-client \
+    && rm -rf /var/lib/apt/lists/*
+COPY alembic.ini ./
+COPY --from=web-builder /app/web/dist ./web/dist
+
+EXPOSE 8000
+VOLUME ["/data", "/media"]
+
+ENV AMANE_DATA_DIR=/data
+ENV AMANE_LOG_DIR=/data/logs
+ENV PATH="/app/.venv/bin:$PATH"
+ENV UV_NO_SYNC=1
+
+CMD ["python", "-m", "amane.server"]

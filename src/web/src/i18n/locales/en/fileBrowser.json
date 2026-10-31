@@ -1,0 +1,7 @@
+{
+  "tooManyEntries": "Too many entries — showing first {{shown}} of {{total}}",
+  "empty": "Empty directory",
+  "selectAll": "Select all",
+  "selectDir": "Select this directory",
+  "toggleHidden": "Toggle hidden files"
+}

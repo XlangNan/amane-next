@@ -1,0 +1,49 @@
+/* 正文: 保留用户输入的换行, 长串 (URL 等) 不撑破卡片. */
+.body {
+  margin-top: 6px;
+  color: var(--mantine-color-text);
+  line-height: 1.65;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* 时间戳是正文里的跳转入口, 用浅色胶囊与正文分开; 颜色取品牌色的两端, 深色下比正文底色亮一档. */
+.timestamp {
+  padding: 0 4px;
+  border: 0;
+  border-radius: 4px;
+  background: light-dark(var(--mantine-color-brand-0), rgb(26 113 255 / 0.18));
+  font: inherit;
+  font-weight: 600;
+  color: light-dark(var(--mantine-color-brand-8), var(--mantine-color-brand-3));
+  cursor: pointer;
+}
+
+.timestamp:hover {
+  background: light-dark(var(--mantine-color-brand-1), rgb(26 113 255 / 0.32));
+}
+
+.timestamp:focus-visible {
+  outline: 2px solid var(--mantine-color-brand-5);
+  outline-offset: 1px;
+}
+
+/* 当前没有可跳转的播放时保留时间戳的样子, 但不给点击. */
+.disabledTimestamp {
+  padding: 0 4px;
+  border-radius: 4px;
+  background: light-dark(var(--mantine-color-gray-2), var(--mantine-color-dark-4));
+  color: var(--mantine-color-dimmed);
+  cursor: not-allowed;
+}
+
+/* 链接用品牌色加下划线同正文分开; 深色下取偏亮的一档, 断行交给 .body 的 overflow-wrap. */
+.link {
+  color: light-dark(var(--mantine-color-brand-7), var(--mantine-color-brand-4));
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.link:hover {
+  color: light-dark(var(--mantine-color-brand-9), var(--mantine-color-brand-2));
+}

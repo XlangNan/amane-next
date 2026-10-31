@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  服务器条目: 操作区在下层贴右边, 卡片覆盖其上, 左滑把卡片整体左移露出编辑与删除 (见 SetupActivity).
+  layoutDirection 固定为 ltr: 左滑是物理方向, 而 layout_gravity="end" 在 RTL 下会贴到左边, 操作区再也滑不出来.
+-->
+<com.github.sqzwx.amane.android.SwipeRowLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layoutDirection="ltr"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_marginBottom="10dp">
+
+    <LinearLayout
+        android:id="@+id/server_actions"
+        android:layout_width="wrap_content"
+        android:layout_height="match_parent"
+        android:layout_gravity="end"
+        android:orientation="horizontal">
+
+        <Button
+            android:id="@+id/server_edit"
+            style="@style/Widget.Amane.Button.Action.Edit"
+            android:layout_width="80dp"
+            android:layout_height="match_parent"
+            android:text="@string/setup_edit" />
+
+        <Button
+            android:id="@+id/server_remove"
+            style="@style/Widget.Amane.Button.Action.Delete"
+            android:layout_width="80dp"
+            android:layout_height="match_parent"
+            android:text="@string/setup_remove" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/server_card"
+        style="@style/Widget.Amane.Card"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:clickable="true"
+        android:focusable="true"
+        android:foreground="?android:attr/selectableItemBackground"
+        android:gravity="center_vertical"
+        android:minHeight="64dp"
+        android:orientation="horizontal">
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/server_name"
+                style="@style/Widget.Amane.RowName"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content" />
+
+            <TextView
+                android:id="@+id/server_url"
+                style="@style/Widget.Amane.RowUrl"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/server_active"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="10dp"
+            android:background="@drawable/bg_chip"
+            android:paddingStart="10dp"
+            android:paddingEnd="10dp"
+            android:paddingTop="4dp"
+            android:paddingBottom="4dp"
+            android:text="@string/setup_active"
+            android:textColor="@color/brand"
+            android:textSize="12sp"
+            android:visibility="gone" />
+    </LinearLayout>
+</com.github.sqzwx.amane.android.SwipeRowLayout>
