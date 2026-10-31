@@ -823,8 +823,9 @@
   },
   "translateTest": {
     "button": "Test translation",
-    "hint": "Sends one real request to Google Translate with the saved network settings; save proxy changes first",
+    "hint": "Sends one request each to Google and Bing and shows both results; save proxy changes first",
     "ok": "Works ({{provider}}): {{source}} → {{text}}",
-    "failed": "Test failed"
+    "failed": "Test failed",
+    "fail": "{{provider}} failed: {{error}}"
   }
 }

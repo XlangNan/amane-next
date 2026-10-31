@@ -1,10 +1,10 @@
-"""设置页「测试翻译」: 用当前网络配置真实请求一次谷歌翻译, 把失败原因直接给用户看."""
+"""设置页「测试翻译」: 用当前网络配置对每个翻译源各真实请求一次, 把各自的结果和失败原因直接给用户看."""
 
 from fastapi import APIRouter
 from pydantic import BaseModel
 
 from ...enums import Language
-from ...translate import TranslateError, Translator
+from ...translate import Translator
 from ..deps import RuntimeDep
 
 router = APIRouter(prefix="/translate", tags=["translate"])
@@ -12,18 +12,22 @@ router = APIRouter(prefix="/translate", tags=["translate"])
 _SAMPLE = "こんにちは世界"
 
 
-class TranslateTestResponse(BaseModel):
+class TranslateProviderResult(BaseModel):
+    provider: str
     ok: bool
-    source: str
     text: str | None = None
-    provider: str | None = None
     error: str | None = None
+
+
+class TranslateTestResponse(BaseModel):
+    source: str
+    results: list[TranslateProviderResult]
 
 
 @router.post("/test")
 async def test_translate(runtime: RuntimeDep) -> TranslateTestResponse:
-    try:
-        text, provider = await Translator(runtime.web_client).probe(_SAMPLE, Language.ZH_CN)
-    except TranslateError as e:
-        return TranslateTestResponse(ok=False, source=_SAMPLE, error=str(e))
-    return TranslateTestResponse(ok=True, source=_SAMPLE, text=text, provider=provider)
+    probes = await Translator(runtime.web_client).probe_all(_SAMPLE, Language.ZH_CN)
+    return TranslateTestResponse(
+        source=_SAMPLE,
+        results=[TranslateProviderResult(provider=p.provider, ok=p.ok, text=p.text, error=p.error) for p in probes],
+    )

@@ -43,9 +43,13 @@ class FakeWeb:
     def __init__(self, replies: dict[str, Any]) -> None:
         self.replies = replies
         self.requests: list[tuple[str, str]] = []
+        self.bodies: list[Any] = []
+        self.headers: list[dict[str, str]] = []
 
-    async def request(self, method: str, url: str, **_: Any) -> FakeResp:
+    async def request(self, method: str, url: str, **kwargs: Any) -> FakeResp:
         self.requests.append((method, url))
+        self.bodies.append(kwargs.get("json"))
+        self.headers.append(kwargs.get("headers") or {})
         for key, value in self.replies.items():
             if key in url:
                 if isinstance(value, Exception):
@@ -148,14 +152,20 @@ async def test_success_resets_failure_count() -> None:
     assert await translator.translate("Hello again", Language.ZH_CN) == "你好"
 
 
-async def test_probe_reports_provider_ignores_breaker_and_lists_reasons() -> None:
-    limited = FakeProvider("a", None, rate_limited=True)
-    translator = make(limited, FakeProvider("b", "你好"))
-    await translator.translate("Hello", Language.ZH_CN)
-    assert await translator.probe("こんにちは", Language.ZH_CN) == ("你好", "b")
-    assert limited.calls == 2  # probe 无视停用状态, 仍会先试第一个源
-    with pytest.raises(TranslateError, match="a down"):
-        await make(FakeProvider("a", None)).probe("x", Language.ZH_CN)
+async def test_probe_all_reports_every_provider_and_ignores_breaker() -> None:
+    limited, backup = FakeProvider("a", None, rate_limited=True), FakeProvider("b", "你好")
+    translator = make(limited, backup)
+    await translator.translate("Hello", Language.ZH_CN)  # 触发 a 的限流停用
+    results = await translator.probe_all("こんにちは", Language.ZH_CN)
+    assert [(r.provider, r.ok) for r in results] == [("a", False), ("b", True)]
+    assert results[0].error == "a down" and results[1].text == "你好"
+    assert limited.calls == 2  # 测试无视停用状态, 仍会请求
+
+
+async def test_probe_all_when_everything_fails_lists_all_reasons() -> None:
+    results = await make(FakeProvider("a", None), FakeProvider("b", None)).probe_all("x", Language.ZH_CN)
+    assert [r.ok for r in results] == [False, False]
+    assert [r.error for r in results] == ["a down", "b down"]
 
 
 async def test_google_provider_tries_second_domain_and_marks_429() -> None:
@@ -176,28 +186,33 @@ async def test_google_provider_tries_second_domain_and_marks_429() -> None:
     assert info2.value.rate_limited is False
 
 
-async def test_edge_provider_fetches_token_once_and_translates() -> None:
-    web = FakeWeb(
-        {
-            "edge.microsoft.com/translate/auth": FakeResp(text=" TOKEN \n"),
-            "api-edge.cognitive": FakeResp([{"translations": [{"text": "你好", "to": "zh-Hans"}]}]),
-        }
-    )
+async def test_edge_provider_posts_plain_string_list_without_token() -> None:
+    web = FakeWeb({"edge.microsoft.com/translate/translatetext": FakeResp([{"translations": [{"text": "你好", "to": "zh-Hans"}]}])})
     provider = edge_mod.EdgeProvider(web)  # type: ignore[arg-type]
     assert await provider.translate_chunk("Hello", Language.ZH_CN) == "你好"
-    assert await provider.translate_chunk("World", Language.ZH_CN) == "你好"
-    assert sum("auth" in url for _, url in web.requests) == 1
-    assert all("to=zh-Hans" in url for _, url in web.requests if "api-edge" in url)
+    method, url = web.requests[0]
+    assert method == "POST"
+    assert "to=zh-Hans" in url and "from=&" in url and "isEnterpriseClient=false" in url
+    assert web.bodies[0] == ["Hello"]
+    assert "Authorization" not in web.headers[0]
 
 
 @pytest.mark.parametrize(
     "replies",
     [
-        {"edge.microsoft.com/translate/auth": FakeResp(text="")},
-        {"edge.microsoft.com/translate/auth": RuntimeError("HTTP 429")},
-        {"edge.microsoft.com/translate/auth": FakeResp(text="T"), "api-edge.cognitive": FakeResp([])},
+        {"translatetext": RuntimeError("HTTP 404")},
+        {"translatetext": FakeResp([])},
+        {"translatetext": FakeResp({"error": "x"})},
     ],
 )
 async def test_edge_provider_errors_are_translate_errors(replies: dict[str, Any]) -> None:
     with pytest.raises(TranslateError):
         await edge_mod.EdgeProvider(FakeWeb(replies)).translate_chunk("Hello", Language.ZH_CN)  # type: ignore[arg-type]
+
+
+async def test_edge_provider_marks_429() -> None:
+    with pytest.raises(TranslateError) as info:
+        await edge_mod.EdgeProvider(FakeWeb({"translatetext": RuntimeError("HTTP 429")})).translate_chunk(  # type: ignore[arg-type]
+            "Hello", Language.ZH_CN
+        )
+    assert info.value.rate_limited is True

@@ -1,4 +1,4 @@
 from .base import Provider, TranslateError
-from .translator import Translator
+from .translator import ProbeResult, Translator
 
-__all__ = ["Provider", "TranslateError", "Translator"]
+__all__ = ["Provider", "ProbeResult", "TranslateError", "Translator"]

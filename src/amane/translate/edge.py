@@ -1,6 +1,5 @@
-"""微软 Edge 浏览器内置翻译的免费接口, 无需密钥, 国内一般可直连. 作为谷歌被限流或连不上时的备用."""
+"""微软 Edge 浏览器内置翻译的免费接口, 无需密钥与令牌. 作为谷歌被限流或连不上时的备用."""
 
-import time
 from typing import TYPE_CHECKING, Any
 
 from ..enums import Language
@@ -9,10 +8,8 @@ from .base import TranslateError, is_rate_limited, short_reason
 if TYPE_CHECKING:
     from ..net.http import WebClient
 
-_AUTH_URL = "https://edge.microsoft.com/translate/auth"
-_TRANSLATE_URL = "https://api-edge.cognitive.microsofttranslator.com/translate"
-_TOKEN_TTL = 480.0
-"""令牌有效期约 10 分钟, 提前换新."""
+_URL = "https://edge.microsoft.com/translate/translatetext"
+"""微软已下线带令牌的旧接口, 现在这个接口不需要令牌; 非官方, 可能随时变动."""
 
 _CODE: dict[Language, str] = {
     Language.ZH_CN: "zh-Hans",
@@ -40,35 +37,18 @@ class EdgeProvider:
 
     def __init__(self, web_client: "WebClient"):
         self._web = web_client
-        self._token = ""
-        self._token_at = 0.0
-
-    async def _auth(self) -> str:
-        if self._token and time.monotonic() - self._token_at < _TOKEN_TTL:
-            return self._token
-        resp = await self._web.request("GET", _AUTH_URL, max_attempts=2)
-        token = resp.text.strip()
-        if not token:
-            raise TranslateError("取不到必应翻译的令牌")
-        self._token = token
-        self._token_at = time.monotonic()
-        return token
 
     async def translate_chunk(self, text: str, target: Language) -> str:
         try:
-            token = await self._auth()
             resp = await self._web.request(
                 "POST",
-                f"{_TRANSLATE_URL}?api-version=3.0&to={_CODE[target]}",
-                headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
-                json=[{"Text": text}],
+                f"{_URL}?from=&to={_CODE[target]}&isEnterpriseClient=false",
+                headers={"Content-Type": "application/json"},
+                json=[text],
                 max_attempts=2,
             )
             raw = resp.json()
-        except TranslateError:
-            raise
         except Exception as e:
-            self._token = ""
             raise TranslateError(short_reason(e), rate_limited=is_rate_limited(e)) from e
         translated = parse_response(raw)
         if translated is None:

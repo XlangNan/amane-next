@@ -54,6 +54,14 @@ def split_text(text: str, limit: int = _CHUNK_CHARS) -> list[str]:
     return chunks
 
 
+@dataclass(frozen=True)
+class ProbeResult:
+    provider: str
+    ok: bool
+    text: str | None = None
+    error: str | None = None
+
+
 @dataclass
 class _Slot:
     provider: Provider
@@ -84,7 +92,7 @@ class Translator:
                     out.append(chunk)
                     continue
                 try:
-                    translated, _ = await self._chunk(chunk, target, respect_breaker=True)
+                    translated = await self._chunk(chunk, target)
                 except TranslateError as e:
                     logger.warning("translate failed", error=str(e))
                     return None
@@ -98,14 +106,22 @@ class Translator:
             return converted if converted != text else None
         return None
 
-    async def probe(self, text: str, target: Language) -> tuple[str, str]:
-        """不做语种判断、无视停用状态地请求一次, 返回 (译文, 源名); 失败抛 ``TranslateError`` 并带各源原因."""
-        return await self._chunk(text, target, respect_breaker=False)
+    async def probe_all(self, text: str, target: Language) -> list[ProbeResult]:
+        """不做语种判断、无视停用状态, 对每个翻译源各请求一次, 返回各自的结果. 供设置页「测试翻译」."""
+        results: list[ProbeResult] = []
+        for slot in self._slots:
+            try:
+                translated = await self._run(slot, text, target)
+            except TranslateError as e:
+                results.append(ProbeResult(provider=slot.provider.name, ok=False, error=str(e)))
+                continue
+            results.append(ProbeResult(provider=slot.provider.name, ok=True, text=translated))
+        return results
 
-    async def _chunk(self, chunk: str, target: Language, *, respect_breaker: bool) -> tuple[str, str]:
+    async def _chunk(self, chunk: str, target: Language) -> str:
         reasons: list[str] = []
         for slot in self._slots:
-            if respect_breaker and slot.blocked():
+            if slot.blocked():
                 reasons.append(f"{slot.provider.name}: 暂时停用")
                 continue
             try:
@@ -115,7 +131,7 @@ class Translator:
                 reasons.append(f"{slot.provider.name}: {e}")
                 continue
             slot.failures = 0
-            return translated, slot.provider.name
+            return translated
         raise TranslateError(" | ".join(reasons))
 
     async def _run(self, slot: _Slot, chunk: str, target: Language) -> str:

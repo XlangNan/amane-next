@@ -9,16 +9,20 @@ import { apiFetch } from "@/lib/api-token";
 const API = import.meta.env.VITE_API_URL || "";
 
 const resultSchema = z.object({
-  ok: z.boolean(),
   source: z.string(),
-  text: z.string().nullable(),
-  provider: z.string().nullable(),
-  error: z.string().nullable(),
+  results: z.array(
+    z.object({
+      provider: z.string(),
+      ok: z.boolean(),
+      text: z.string().nullable(),
+      error: z.string().nullable(),
+    }),
+  ),
 });
 
 type TestResult = z.infer<typeof resultSchema>;
 
-/** 用已保存的网络设置真实请求一次谷歌翻译, 失败原因直接显示. */
+/** 用已保存的网络设置对每个翻译源各真实请求一次, 分别显示结果与失败原因. */
 export function TranslateTest() {
   const { t } = useTranslation("settings");
   const [running, setRunning] = useState(false);
@@ -54,19 +58,20 @@ export function TranslateTest() {
           {t("translateTest.hint")}
         </Text>
       </Group>
-      {result?.ok === true && (
-        <Alert color="green" variant="light" icon={<IconCheck size={18} />}>
-          {t("translateTest.ok", {
-            source: result.source,
-            text: result.text ?? "",
-            provider: result.provider ?? "",
-          })}
-        </Alert>
-      )}
-      {result?.ok === false && (
-        <Alert color="red" variant="light" icon={<IconX size={18} />}>
-          {result.error}
-        </Alert>
+      {result?.results.map((item) =>
+        item.ok ? (
+          <Alert key={item.provider} color="green" variant="light" icon={<IconCheck size={18} />}>
+            {t("translateTest.ok", {
+              provider: item.provider,
+              source: result.source,
+              text: item.text ?? "",
+            })}
+          </Alert>
+        ) : (
+          <Alert key={item.provider} color="red" variant="light" icon={<IconX size={18} />}>
+            {t("translateTest.fail", { provider: item.provider, error: item.error ?? "" })}
+          </Alert>
+        ),
       )}
       {failure !== null && (
         <Alert color="red" variant="light" icon={<IconX size={18} />}>

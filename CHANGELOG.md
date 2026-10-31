@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.24.0 (Amane-next)
+## v0.24.4 (Amane-next)
 
 基于 v0.23.0.
 
