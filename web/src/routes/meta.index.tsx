@@ -15,6 +15,7 @@ import { HintedActionIcon } from "@/components/common/hinted-action-icon";
 import { InfiniteScrollSentinel } from "@/components/common/infinite-scroll-sentinel";
 import { ListDefaultActions } from "@/components/common/list-default-actions";
 import { PageSizeSelect } from "@/components/common/page-size-select";
+import { RescrapeAllButton } from "@/components/media/rescrape-all-button";
 import { SortMenu } from "@/components/common/sort-menu";
 import { FacetBadge } from "@/components/media/facet-badge";
 import {
@@ -336,6 +337,8 @@ function MetaIndexPage() {
       }
       extras={
         <>
+          <RescrapeAllButton onlyWithKana />
+          <RescrapeAllButton />
           {/* 窄屏的筛选在底部面板里常驻展开, 该开关只在宽屏有意义. */}
           {narrowViewport ? null : (
             <HintedActionIcon

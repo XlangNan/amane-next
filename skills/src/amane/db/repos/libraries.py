@@ -1,0 +1,254 @@
+from collections.abc import Sequence
+from typing import Unpack
+
+from sqlmodel import col, select
+from sqlmodel.ext.asyncio.session import AsyncSession
+
+from ...enums import DownloadableResource, LibraryAutomation, LibraryIngest, LinkMode, MoveMode
+from ...library import (
+    DEFAULT_SUBTITLE_EXTENSIONS,
+    DEFAULT_TRAILER_PATTERN,
+    cloud_paths_overlap,
+    normalize_subtitle_extensions,
+    resolve_ingest_cloud_path,
+    validate_blacklist_pattern,
+    validate_min_file_size,
+    validate_trailer_pattern,
+)
+from ...organize.path_templates import VIDEO_TEMPLATE_DEFAULT, normalize_link_template, validate_path_template
+from ...organize.strm_content import normalize_strm_content_template, validate_strm_content_template
+from ...utils.path import resolved_path
+from ..models import Library, MediaFile
+from ..repo_types import LibraryUpdates
+from .base import RepositoryMixinBase
+
+
+def _path_template_or_none(value: str | None) -> str | None:
+    return None if value is None else validate_path_template(value)
+
+
+def _strm_content_or_none(value: str | None) -> str | None:
+    normalized = normalize_strm_content_template(value)
+    return None if normalized is None else validate_strm_content_template(normalized)
+
+
+async def _reject_overlapping_cloud_path(
+    session: AsyncSession,
+    cloud_path: str,
+    *,
+    exclude_id: int | None = None,
+) -> None:
+    stmt = select(Library).where(Library.ingest == LibraryIngest.CLOUDDRIVE)
+    if exclude_id is not None:
+        stmt = stmt.where(col(Library.id) != exclude_id)
+    others = (await session.exec(stmt)).all()
+    for other in others:
+        if other.cloud_path is not None and cloud_paths_overlap(cloud_path, other.cloud_path):
+            raise ValueError("cloud_path 与已有 CloudDrive 媒体库重叠")
+
+
+class LibrariesRepoMixin(RepositoryMixinBase):
+    async def create_library(
+        self,
+        name: str,
+        path: str,
+        automation: LibraryAutomation = LibraryAutomation.SCRAPE,
+        auto_organize: bool = False,
+        ingest: LibraryIngest = LibraryIngest.NATIVE,
+        cloud_path: str | None = None,
+        recursive: bool = True,
+        patterns: list[str] | None = None,
+        move_mode: MoveMode = MoveMode.MOVE,
+        in_place: bool = False,
+        video_template: str = VIDEO_TEMPLATE_DEFAULT,
+        link_template: str | None = None,
+        link_mode: LinkMode = LinkMode.STRM,
+        strm_content_template: str | None = None,
+        thumb_template: str | None = None,
+        poster_template: str | None = None,
+        fanart_template: str | None = None,
+        extrafanart_template: str | None = None,
+        nfo_template: str | None = None,
+        trailer_template: str | None = None,
+        subtitle_template: str | None = None,
+        subtitle_extensions: list[str] | None = None,
+        write_nfo: bool = True,
+        copy_resources: list[DownloadableResource] | None = None,
+        trailer_pattern: str | None = None,
+        blacklist_patterns: list[str] | None = None,
+        min_file_size: int = 0,
+    ) -> Library:
+        min_file_size = validate_min_file_size(min_file_size)
+        cloud_path = resolve_ingest_cloud_path(ingest, cloud_path)
+        video_template = validate_path_template(video_template)
+        link_template = _path_template_or_none(normalize_link_template(link_template))
+        strm_content_template = _strm_content_or_none(strm_content_template)
+        thumb_template = _path_template_or_none(thumb_template)
+        poster_template = _path_template_or_none(poster_template)
+        fanart_template = _path_template_or_none(fanart_template)
+        extrafanart_template = _path_template_or_none(extrafanart_template)
+        nfo_template = _path_template_or_none(nfo_template)
+        trailer_template = _path_template_or_none(trailer_template)
+        subtitle_template = _path_template_or_none(subtitle_template)
+        async with self._session() as session:
+            if cloud_path is not None:
+                await _reject_overlapping_cloud_path(session, cloud_path)
+            lib = Library(
+                name=name,
+                path=str(resolved_path(path)),
+                automation=automation,
+                auto_organize=auto_organize,
+                ingest=ingest,
+                cloud_path=cloud_path,
+                recursive=recursive,
+                patterns=patterns if patterns is not None else [],
+                move_mode=move_mode,
+                in_place=in_place,
+                video_template=video_template,
+                link_template=normalize_link_template(link_template),
+                link_mode=link_mode,
+                strm_content_template=strm_content_template,
+                thumb_template=thumb_template,
+                poster_template=poster_template,
+                fanart_template=fanart_template,
+                extrafanart_template=extrafanart_template,
+                nfo_template=nfo_template,
+                trailer_template=trailer_template,
+                subtitle_template=subtitle_template,
+                subtitle_extensions=normalize_subtitle_extensions(
+                    list(subtitle_extensions) if subtitle_extensions is not None else list(DEFAULT_SUBTITLE_EXTENSIONS)
+                ),
+                write_nfo=write_nfo,
+                copy_resources=list(copy_resources) if copy_resources is not None else list(DownloadableResource),
+                trailer_pattern=validate_trailer_pattern(
+                    trailer_pattern if trailer_pattern is not None else DEFAULT_TRAILER_PATTERN
+                ),
+                blacklist_patterns=[validate_blacklist_pattern(p) for p in (blacklist_patterns or [])],
+                min_file_size=min_file_size,
+            )
+            session.add(lib)
+            await session.commit()
+            await session.refresh(lib)
+            return lib
+
+    async def list_libraries(self, watch_only: bool = False) -> list[Library]:
+        async with self._session() as session:
+            stmt = select(Library)
+            if watch_only:
+                stmt = stmt.where(Library.automation != LibraryAutomation.NONE)
+            result = await session.exec(stmt)
+            return list(result.all())
+
+    async def get_library(self, library_id: int) -> Library | None:
+        async with self._session() as session:
+            return await session.get(Library, library_id)
+
+    async def get_library_names(self, library_ids: Sequence[int]) -> dict[int, str]:
+        """不存在的 id 不出现在结果中."""
+        ids = list(dict.fromkeys(int(i) for i in library_ids if i))
+        if not ids:
+            return {}
+        async with self._session() as session:
+            rows = (await session.exec(select(Library.id, Library.name).where(col(Library.id).in_(ids)))).all()
+            return {int(i): str(n) for i, n in rows if i is not None}
+
+    async def get_library_for_path(self, file_path: str) -> Library | None:
+        """最长前缀匹配. 仅迁移或无法解析归属时使用, 不是入库归属真值."""
+        best: Library | None = None
+        for lib in await self.list_libraries():
+            if file_path.startswith(lib.path) and (best is None or len(lib.path) > len(best.path)):
+                best = lib
+        return best
+
+    async def delete_library(self, library_id: int) -> int:
+        """须同时删除归属 MediaFile, 否则留下悬空非空 FK. 返回被级联删除的文件数."""
+        async with self._session() as session:
+            lib = await session.get(Library, library_id)
+            if lib is None:
+                return 0
+            stmt = select(MediaFile).where(MediaFile.library_id == library_id)
+            result = await session.exec(stmt)
+            media_files = list(result.all())
+            for mf in media_files:
+                await session.delete(mf)
+            # 未声明 ORM relationship, UoW 不会排序删除顺序; 须先 flush 子表.
+            await session.flush()
+            await session.delete(lib)
+            await session.commit()
+            return len(media_files)
+
+    async def update_library(self, library_id: int, **updates: Unpack[LibraryUpdates]) -> Library | None:
+        async with self._session() as session:
+            lib = await session.get(Library, library_id)
+            if lib is None:
+                return None
+            # 显式赋值, 禁止 setattr; 字段集由 LibraryUpdates 与 Library 静态对齐.
+            if "name" in updates:
+                lib.name = updates["name"]
+            # 值未变时不改写形式: 老库的库路径可能还没解析为真实路径, 而索引行都是与它同一形式的写法,
+            # 仅仅重新保存一次就把库根换成另一种写法, 会把同一个文件算成两条索引.
+            if "path" in updates and updates["path"] != lib.path:
+                lib.path = str(resolved_path(updates["path"]))
+            if "automation" in updates:
+                lib.automation = updates["automation"]
+            if "auto_organize" in updates:
+                lib.auto_organize = updates["auto_organize"]
+            if "ingest" in updates:
+                lib.ingest = updates["ingest"]
+            if "cloud_path" in updates:
+                lib.cloud_path = updates["cloud_path"]
+            lib.cloud_path = resolve_ingest_cloud_path(lib.ingest, lib.cloud_path)
+            if lib.cloud_path is not None:
+                await _reject_overlapping_cloud_path(session, lib.cloud_path, exclude_id=library_id)
+            if "recursive" in updates:
+                lib.recursive = updates["recursive"]
+            if "patterns" in updates:
+                patterns = updates["patterns"]
+                lib.patterns = patterns if patterns is not None else []
+            if "move_mode" in updates:
+                lib.move_mode = updates["move_mode"]
+            if "in_place" in updates:
+                lib.in_place = updates["in_place"]
+            if "video_template" in updates:
+                lib.video_template = validate_path_template(updates["video_template"])
+            if "link_template" in updates:
+                lib.link_template = _path_template_or_none(normalize_link_template(updates["link_template"]))
+            if "link_mode" in updates:
+                lib.link_mode = updates["link_mode"]
+            if "strm_content_template" in updates:
+                lib.strm_content_template = _strm_content_or_none(updates["strm_content_template"])
+            if "thumb_template" in updates:
+                lib.thumb_template = _path_template_or_none(updates["thumb_template"])
+            if "poster_template" in updates:
+                lib.poster_template = _path_template_or_none(updates["poster_template"])
+            if "fanart_template" in updates:
+                lib.fanart_template = _path_template_or_none(updates["fanart_template"])
+            if "extrafanart_template" in updates:
+                lib.extrafanart_template = _path_template_or_none(updates["extrafanart_template"])
+            if "nfo_template" in updates:
+                lib.nfo_template = _path_template_or_none(updates["nfo_template"])
+            if "trailer_template" in updates:
+                lib.trailer_template = _path_template_or_none(updates["trailer_template"])
+            if "subtitle_template" in updates:
+                lib.subtitle_template = _path_template_or_none(updates["subtitle_template"])
+            if "subtitle_extensions" in updates:
+                extensions = updates["subtitle_extensions"]
+                lib.subtitle_extensions = normalize_subtitle_extensions(
+                    list(extensions) if extensions is not None else []
+                )
+            if "write_nfo" in updates:
+                lib.write_nfo = updates["write_nfo"]
+            if "copy_resources" in updates:
+                resources = updates["copy_resources"]
+                lib.copy_resources = resources if resources is not None else []
+            if "trailer_pattern" in updates:
+                lib.trailer_pattern = validate_trailer_pattern(updates["trailer_pattern"])
+            if "blacklist_patterns" in updates:
+                patterns = updates["blacklist_patterns"]
+                lib.blacklist_patterns = [validate_blacklist_pattern(p) for p in (patterns or [])]
+            if "min_file_size" in updates:
+                lib.min_file_size = validate_min_file_size(updates["min_file_size"])
+            session.add(lib)
+            await session.commit()
+            await session.refresh(lib)
+            return lib

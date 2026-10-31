@@ -73,6 +73,28 @@ class TestMetadataBatchHttp:
         assert (await client.post("metadata/batch/scrape", json={"ids": []})).status_code == 422
 
     @pytest.mark.asyncio(loop_scope="function")
+    @pytest.mark.parametrize(
+        ("body", "expected_cache"),
+        [({}, []), ({"force": True}, []), ({"force": False}, ["metadata", "trans"])],
+    )
+    async def test_rescrape_all(
+        self, client: AsyncClient, repo: Repository, stop_worker: None, body: dict[str, bool], expected_cache: list[str]
+    ):
+        await repo.upsert_metadata(number="RA-001")
+        await repo.upsert_metadata(number="RA-002")
+        resp = await client.post("metadata/rescrape-all", json=body)
+        assert resp.status_code == 202
+        assert resp.json() == {"submitted": 2}
+        tasks = await repo.list_tasks(task_types=[TaskType.SCRAPE])
+        assert {t.payload["number"] for t in tasks} == {"RA-001", "RA-002"}
+        assert all(sorted(t.payload["use_cache"]) == sorted(expected_cache) for t in tasks)
+
+    @pytest.mark.asyncio(loop_scope="function")
+    async def test_rescrape_all_empty_library_and_bad_body(self, client: AsyncClient, stop_worker: None):
+        assert (await client.post("metadata/rescrape-all", json={})).json() == {"submitted": 0}
+        assert (await client.post("metadata/rescrape-all", json={"force": "maybe"})).status_code == 422
+
+    @pytest.mark.asyncio(loop_scope="function")
     async def test_batch_user_tags(self, client: AsyncClient, repo: Repository):
         tags, _created = await repo.ensure_user_tags(["watched"])
         tag = tags[0]
@@ -118,3 +140,23 @@ class TestMetadataBatchHttp:
                 "metadata/batch/user-tags", json={"ids": [], "user_tag_ids": [tag.id], "action": "attach"}
             )
         ).status_code == 422
+
+
+class TestRescrapeAllKanaFilter:
+    @pytest.mark.asyncio(loop_scope="function")
+    @pytest.mark.parametrize(
+        ("title", "plot", "picked"),
+        [
+            ("こんにちは", None, True),
+            ("你好", "これは説明", True),
+            ("你好", "这是说明", False),
+            (None, None, False),
+            ("Hello", "world", False),
+        ],
+    )
+    async def test_only_with_kana(
+        self, client: AsyncClient, repo: Repository, stop_worker: None, title: str | None, plot: str | None, picked: bool
+    ):
+        await repo.upsert_metadata(number="KN-001", title=title, plot=plot)
+        resp = await client.post("metadata/rescrape-all", json={"only_with_kana": True})
+        assert resp.json() == {"submitted": 1 if picked else 0}

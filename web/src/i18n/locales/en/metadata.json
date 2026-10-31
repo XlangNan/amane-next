@@ -390,5 +390,20 @@
     "unlocked": "Unlocked",
     "toggleLocked": "Unlock field",
     "toggleUnlocked": "Lock field"
+  },
+  "rescrapeAll": {
+    "button": "Rescrape all",
+    "hint": "Rescrape every item (nothing is deleted; locks, tags and comments are kept). Re-organize the library afterwards to rewrite NFO files",
+    "confirmTitle": "Rescrape all items?",
+    "confirmDesc": "Submits one scrape task per item without using caches, re-queries every site and translates per settings. This can take a long time. Nothing is deleted; re-organize the library afterwards to rewrite NFO files",
+    "confirm": "Start",
+    "started": "{{count}} scrape tasks submitted",
+    "failed": "Submit failed",
+    "kana": {
+      "button": "Rescrape still-Japanese",
+      "hint": "Rescrape only items whose title or plot still contains kana (failed translations)",
+      "confirmTitle": "Rescrape items that are still Japanese?",
+      "confirmDesc": "Submits scrape tasks only for items whose title or plot still contains kana, without caches. Nothing is deleted; re-organize the library afterwards to rewrite NFO files"
+    }
   }
 }

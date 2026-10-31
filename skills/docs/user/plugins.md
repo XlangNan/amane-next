@@ -1,0 +1,164 @@
+# 插件
+
+插件是社区开发的扩展包, 可以为 Amane 增加新的刮削数据源或播放源. 目前没有官方插件市场, 社区可以自行开发和分发插件.
+
+!!! danger "安全提示"
+    插件在 Amane 进程内运行, **可以执行任意代码**. 不要安装未经安全审查的插件.
+
+## 安装插件
+
+在「管理 → 插件」页面, 有两种安装方式:
+
+- **上传 zip**: 选择本地的插件 zip 文件上传
+- **选择服务器路径**: 填写服务器上已有的插件目录或 zip 文件路径
+
+安装是热加载的, 成功后插件立即出现在列表中, 不需要重启服务. 出于安全考虑, 不提供远程下载安装的方式.
+
+## 使用插件
+
+### 启用与配置
+
+在「插件」页面可以:
+
+- 控制每个插件的启用/禁用状态
+- 配置插件开发者定义的配置项 (如 API 密钥等)
+
+### 加入刮削路由
+
+影片刮削插件安装后, 需要在「设置 → 影片刮削 → 类型路由」中将插件 ID 添加到对应内容类型的站点列表中, 插件才会在刮削时被调用.
+
+播放源插件不写入类型路由. 启用后, 影片详情页会把它列为可播放源.
+
+### 更新与卸载
+
+- **更新**: 用新版本覆盖安装即可
+- **卸载**: 在插件列表中删除, 卸载后插件数据保留在数据目录中
+
+## 开发插件
+
+!!! info "面向开发者"
+    以下内容面向插件开发者.
+
+插件本质上是一个 Python 包. 影片刮削插件继承 `FilmSourcePlugin` 并实现 `build()`; 播放源插件继承 `PlaybackPlugin` 并实现 `build_playback()`. 同一类可以同时继承二者. 插件运行时与 Amane 在同一进程中, 共享 Python 环境.
+
+### 目录结构
+
+插件必须包含一个 `plugin.py` 文件, 其中包含名为 `Plugin` 的 `FilmSourcePlugin` 或 `PlaybackPlugin` 子类:
+
+```
+my_plugin/
+  plugin.py
+  utils.py
+  ...
+```
+
+多模块时使用相对导入.
+
+### 插件 ID
+
+ID 是插件的唯一标识, 格式为 `namespace.local` (如 `alice.example`):
+
+- 至少两段, 多段也合法 (如 `alice.foo.bar`)
+- 每段只包含小写字母 / 数字 / `-` / `_`, 且必须以字母或数字开头
+- namespace 不能是保留字 (`amane` / `plugin` / `official` / `builtin`), 也不能与内置站点重名
+
+### 示例
+
+```python
+# plugin.py
+from typing import override
+
+from pydantic import BaseModel, ConfigDict
+
+from amane.plugin import (
+    FetchOptions,
+    FilmSourcePlugin,
+    FilmSourceProvider,
+    MediaMetadata,
+    PluginContext,
+    SearchQuery,
+    SkipReason,
+    SourceCapability,
+    SourceDescriptor,
+)
+
+
+class ExampleConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    api_token: str = ""
+
+
+class ExampleProvider(FilmSourceProvider):
+    def __init__(self, context: PluginContext, config: ExampleConfig) -> None:
+        self._http = context.http_client
+        self._token = config.api_token
+
+    @override
+    async def fetch(self, query: SearchQuery, options: FetchOptions | None = None) -> MediaMetadata | None:
+        if not query.number:
+            return None
+        data = await self._http.get_json(
+            "https://example.test/api/movie",
+            headers={"Authorization": f"Bearer {self._token}"} if self._token else None,
+        )
+        if not isinstance(data, dict):
+            return None
+        title = data.get("title")
+        if not isinstance(title, str) or not title:
+            return None
+        return MediaMetadata(number=query.number, title=title)
+
+
+class Plugin(FilmSourcePlugin):
+    config_model = ExampleConfig
+
+    @classmethod
+    @override
+    def descriptor(cls) -> SourceDescriptor:
+        return SourceDescriptor(
+            id="alice.example",
+            name="Alice Example",
+            version="0.1.0",
+            capabilities=frozenset({SourceCapability.FILM_METADATA.value}),
+            urls=("https://example.test",),
+        )
+
+    @override
+    def build(self, context: PluginContext, config: BaseModel) -> FilmSourceProvider:
+        if not isinstance(config, ExampleConfig):
+            raise TypeError("unexpected config type")
+        return ExampleProvider(context, config)
+```
+
+### 开发要点
+
+- **未命中返回 `None`**: 请求成功但没有得到元数据 (或番号不匹配), 这是「没有找到」, 不是失败
+- **网络失败抛 `SourceError`**: 交给 Amane 分类记录, 任务不会崩溃, 站点明细里能看到原因. 不要 `except Exception` 吞掉异常
+- **网络请求走 `context.http_client`**: 共享 Amane 的代理、重试、限速, 并记入任务记录, 不要自建客户端. 播放码流由主机反向代理, 插件只返回上游 URL 与服务端请求头
+- **`descriptor.urls`** 填插件需访问的站点, 会用于请求限速
+- **连通性检测**: 可选的 `check_connectivity` 供 Amane 的「网络检测」页探测本源. 不实现时主机探测 `descriptor.urls` 的第一个地址; 入口不同 (登录页 / 需要 token 的 API) 或凭据缺失就实现它, 后者返回 `ConnectivityOutcome.skipped(SkipReason.MISSING_CREDENTIAL)` 说明无法探测的原因. 请求照旧走 `context.http_client`
+- **落盘写 `context.data_dir`**: 插件自己的 `{data_dir}/plugins/<id>/` 目录, 卸载时保留, 适合放缓存
+- **行为开关**: 主机能识别的来源行为写在 descriptor 的 `traits` 里, 目前有 `needs_partial` / `multi_language` / `uses_file_hash`; 宿主不认识的取值会被忽略, 因此可以声明为更新宿主准备的能力
+- **多语言支持**: descriptor 的 `traits` 声明 `multi_language`, 主机按字段语言展开获取节点, fetch 通过 `options.language` 获取当前语言
+- **前序结果**: descriptor 声明 `traits={"needs_partial"}` 时该来源排在聚合第二段, fetch 经只读的 `query.partial_result` 读取前序标量与第一段各来源已抓到的封面 / 缩略图 / 预告片地址 (只含第一段贡献, 不构成最终图片列表的前缀); 为 `None` 表示本次不在第二段
+- **文件指纹**: descriptor 的 `traits` 声明 `uses_file_hash` 时, 主机在刮削前计算所关联文件的 oshash 并经 `query.file_hash` 传入; 本次没有关联文件时为 `None`
+- **出演者**: `actors` 为 `FilmActor` 列表 (`name` + `gender`). 仍可传入字符串列表, 性别视为未识别. 名单能判定性别时写出 `female` / `male`
+- **仅播放插件**: descriptor 必须显式声明 `playback`. 播放源插件可以声明打开某个已入库文件, 或声明上游地址; 媒体正文一律由主机打开或代理, 插件不直接向浏览器输出字节
+- **HLS**: 返回带 locator 的 HLS 目标. locator 负责读取清单, 并把清单里的原始 URI 定位成上游地址. 主机改写清单并代理分片与密钥. 不允许要求本机转码
+- **解析结果有效期**: 主机每次取流都会调用 `resolve`. 返回的播放目标可以带 `cache_ttl` (秒, 正数) 声明可复用时长, 主机在这么多秒内复用这一次解析结果, 上限 300 秒; 不声明就不缓存. 签名 URL 与会话凭据必须声明不超过其实际有效期的值, 声明过长会让播放器拿到已失效的地址. 改插件配置会清空这份缓存, 下次取流重新解析
+- **字幕**: `probe` 声明轨道; `subtitle` 返回 WebVTT 正文或上游 VTT 地址. 需要读取本机字幕文件时由插件自行读取并转换为 WebVTT, 主机不读字幕文件
+- **不得阻塞事件循环**: `probe`、`resolve`、`subtitle` 在 Amane 的事件循环上被调用. 读盘、`stat`、同步 HTTP 等阻塞调用必须用 `asyncio.to_thread` 提交到线程池. 阻塞调用会让整个服务端停止推进, 其它来源的探测一并超时. 探测预算由主机计时, 无法中断已经进入事件循环的阻塞调用
+
+### 插件配置
+
+插件配置是 Pydantic 模型 (`config_model`), 界面根据 JSON Schema 自动渲染表单:
+
+- 用 `extra="forbid"` 防止未知字段
+- 含 `token` / `api_key` / `secret` 等关键词的字段在任务快照中自动脱敏
+- 校验失败时界面直接显示错误消息
+
+不需要自定义配置时, 不必设置 `config_model`.
+
+### 分发
+
+将代码打包成 zip, 保证根目录或单一顶层目录内可找到 `plugin.py`. 不要将 `__pycache__` 或 `.git` 等无关内容打包进去.

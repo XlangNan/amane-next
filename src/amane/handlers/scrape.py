@@ -12,7 +12,7 @@ from ..media import materialize_images
 from ..observability import current
 from ..observability.models import SiteOutcomeKind
 from ..plugins.models import SourceDescriptor, SourceTrait
-from ..translate import GoogleTranslator
+from ..translate import Translator
 from ._common import ensure_oshash, finalize_media_file
 from .models import ActorScrapePayload, CacheKind, OrganizePayload, ScrapePayload, ScrapeResult
 from .protocol import FollowupTask, TaskHandler, TaskResult
@@ -49,7 +49,7 @@ class ScrapeHandler(TaskHandler[ScrapePayload, ScrapeResult]):
         self._factory = factory
         self._config = pipeline_config
         self._web_client = web_client
-        self._translator = GoogleTranslator(web_client) if web_client is not None else None
+        self._translator = Translator(web_client) if web_client is not None else None
         self._resource_store = resource_store
         # 调度事实只从来源目录读取: 内置来源的 descriptor 由 profile() 合成, 插件来源由插件声明.
         catalog = source_catalog if source_catalog is not None else builtin_descriptors()
@@ -320,7 +320,7 @@ class ScrapeHandler(TaskHandler[ScrapePayload, ScrapeResult]):
             return None
         result = await self._translator.translate(value, target)
         if result:
-            current().debug("field translated", field=str(field), target=str(target))
+            current().info("field translated", field=str(field), target=str(target), preview=result[:40])
         else:
-            current().debug("field not translated", field=str(field), target=str(target))
+            current().info("field not translated", field=str(field), target=str(target))
         return result

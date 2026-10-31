@@ -8,7 +8,7 @@ from ...aggregate import compute_merge_updates
 from ...db.models import MetadataSortField, SortOrder, TaskType
 from ...db.repo_types import WriteMode
 from ...db.repos.media import file_phase_of
-from ...handlers import ScrapePayload
+from ...handlers import CacheKind, ScrapePayload
 from ...media import manual_crop_image
 from ...parsing import DEFINITION_VALUES, ContentType, Mosaic, summarize_file_phases
 from ...parsing import FilePhaseSummary as ParsedFilePhase
@@ -24,6 +24,8 @@ from ..models import (
     MetadataBatchIdsRequest,
     MetadataBatchScrapeRequest,
     MetadataBatchScrapeResponse,
+    MetadataRescrapeAllRequest,
+    MetadataRescrapeAllResponse,
     MetadataDetailResponse,
     MetadataListResponse,
     MetadataLocksRequest,
@@ -159,6 +161,17 @@ async def batch_scrape_metadata(req: MetadataBatchScrapeRequest, repo: RepoDep) 
     task_ids = [task.id for task in tasks if task.id is not None]
     logger.info("metadata batch scrape submitted", submitted=len(task_ids), missing=missing)
     return MetadataBatchScrapeResponse(submitted=len(task_ids), missing=missing, task_ids=task_ids)
+
+
+@router.post("/rescrape-all", status_code=202)
+async def rescrape_all_metadata(req: MetadataRescrapeAllRequest, repo: RepoDep) -> MetadataRescrapeAllResponse:
+    """整库重新刮削: 不删除任何数据, 锁定字段、用户标签、评论、文件关联全部保留."""
+    use_cache = {CacheKind.metadata, CacheKind.trans} if not req.force else set[CacheKind]()
+    targets = await repo.all_metadata_scrape_targets(only_with_kana=req.only_with_kana)
+    payloads = [ScrapePayload(number=number, content_type=content_type, use_cache=use_cache) for number, content_type in targets]
+    tasks = await repo.create_tasks(TaskType.SCRAPE, payloads)
+    logger.info("metadata rescrape all submitted", submitted=len(tasks), force=req.force)
+    return MetadataRescrapeAllResponse(submitted=len(tasks))
 
 
 @router.post("/batch/user-tags")

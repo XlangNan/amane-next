@@ -17,9 +17,10 @@ def test_hot_slice_scrape_drops_noise():
         "logging": {"level": "INFO"},
         "notify": {"dingtalk_webhook": "https://oapi.dingtalk.com/robot/send?access_token=t"},
         "emby": {"api_key": "k"},
+        "translate": {"enabled": True},
         "sr": {},
     }
-    assert set(hot_slice_for_task(full, "scrape").keys()) == {"scraping", "network", "r18", "plugins"}
+    assert set(hot_slice_for_task(full, "scrape").keys()) == {"scraping", "network", "r18", "plugins", "translate"}
     assert {"notify", "emby", "watcher", "worker", "logging"}.isdisjoint(hot_slice_for_task(full, "organize"))
 
 

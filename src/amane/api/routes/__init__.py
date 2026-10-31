@@ -8,6 +8,7 @@ from .facets import router as facets_router
 from .feeds import router as feeds_router
 from .files import router as files_router
 from .emby import router as emby_router
+from .translate import router as translate_router
 from .health import router as health_router
 from .libraries import router as libraries_router
 from .media import router as media_router
@@ -28,6 +29,7 @@ router = APIRouter(prefix=API_PREFIX)
 router.include_router(health_router)
 router.include_router(config_router)
 router.include_router(emby_router)
+router.include_router(translate_router)
 router.include_router(cleanup_router)
 router.include_router(files_router)
 router.include_router(media_router)

@@ -1,0 +1,15 @@
+import { defineConfig } from "@hey-api/openapi-ts";
+
+export default defineConfig({
+  input: "./openapi.json",
+  output: "src/client",
+  plugins: [
+    "@hey-api/schemas",
+    {
+      name: "@tanstack/react-query",
+      queryOptions: true,
+      queryKeys: true,
+      mutationOptions: true,
+    },
+  ],
+});

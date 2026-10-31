@@ -11,7 +11,7 @@ from sqlalchemy.engine.url import make_url
 from .models import REDACTION_PLACEHOLDER
 
 # scrape 回放只需这些 section; watcher/worker/logging/sr 对解析无贡献
-_SCRAPE_HOT_KEYS: tuple[str, ...] = ("scraping", "network", "r18", "plugins")
+_SCRAPE_HOT_KEYS: tuple[str, ...] = ("scraping", "network", "r18", "plugins", "translate")
 
 
 def hot_slice_for_task(hot_dump: dict[str, Any], task_type: str) -> dict[str, Any]:

@@ -152,6 +152,17 @@ class MetadataBatchScrapeRequest(BaseModel):
     )
 
 
+class MetadataRescrapeAllRequest(BaseModel):
+    force: bool = Field(
+        default=True, description="True = 不复用任何缓存, 重新请求各站点; False = 复用站点快照, 只重新聚合与翻译"
+    )
+    only_with_kana: bool = Field(default=False, description="只重刮标题或简介里还含日文假名的影片 (翻译没成功的)")
+
+
+class MetadataRescrapeAllResponse(BaseModel):
+    submitted: int = Field(description="提交的刮削任务数")
+
+
 class MetadataBatchScrapeResponse(BaseModel):
     submitted: int = Field(description="成功提交的任务数")
     missing: int = Field(description="不存在的 id 数量")

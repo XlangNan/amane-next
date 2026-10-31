@@ -9,6 +9,7 @@ from sqlmodel import col, select
 from ...enums import ActorGender, MetadataField
 from ...parsing import ContentType, Mosaic, infer_content_type
 from ...utils.collections import unique_ids
+from ...utils.language import has_kana
 from ...utils.text import normalize_long_text
 from ..models import (
     MediaFile,
@@ -240,6 +241,22 @@ class MetadataRepoMixin(RepositoryMixinBase):
             stmt = select(col(Metadata.id), col(Metadata.content_type)).where(col(Metadata.id).in_(unique))
             rows = (await session.exec(stmt)).all()
             return {row_id: content_type for row_id, content_type in rows if row_id is not None}
+
+    async def all_metadata_scrape_targets(self, *, only_with_kana: bool = False) -> list[tuple[str, ContentType]]:
+        """全部影片条目的 (番号, 内容类型), 按 id 升序; 供整库重新刮削.
+
+        ``only_with_kana`` 只留标题或简介里还含日文假名的条目 (翻译没成功的).
+        """
+        async with self._session() as session:
+            stmt = select(
+                col(Metadata.number), col(Metadata.content_type), col(Metadata.title), col(Metadata.plot)
+            ).order_by(col(Metadata.id))
+            rows = (await session.exec(stmt)).all()
+        return [
+            (number, content_type)
+            for number, content_type, title, plot in rows
+            if not only_with_kana or has_kana(title or "") or has_kana(plot or "")
+        ]
 
     async def upsert_metadata(
         self,

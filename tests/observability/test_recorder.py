@@ -87,7 +87,7 @@ def test_recorder_omits_secrets_when_none(tmp_path: Path, task: Task):
     root = task_dir_for(tmp_path, 42)
     assert not (root / SECRETS_HOT_FILENAME).exists()
     cfg = json.loads((root / "config.hot.json").read_text())
-    assert set(cfg.keys()) == {"scraping", "network", "r18", "plugins"}
+    assert set(cfg.keys()) == {"scraping", "network", "r18", "plugins", "translate"}
 
 
 def test_recorder_success_discards_http_unless_debug(tmp_path: Path, task: Task):

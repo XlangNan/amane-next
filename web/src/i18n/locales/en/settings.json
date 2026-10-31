@@ -545,6 +545,10 @@
       "media_extensions": {
         "label": "Media Extensions",
         "description": "Media file extensions to watch and scan, comma-separated"
+      },
+      "polling_interval_seconds": {
+        "label": "Polling interval (s)",
+        "description": "How often polling mode rescans all watched directories. Lower is faster but uses more CPU; use 60+ for large trees. Takes effect after restart"
       }
     },
     "sr": {
@@ -770,7 +774,7 @@
     "translate": {
       "enabled": {
         "label": "Enable translation",
-        "description": "Translate title / plot into the field language with Google's free translate endpoint; no key needed, uses the global proxy from Network. Original text is kept on failure"
+        "description": "Translate title / plot into the field language; uses Google's free endpoint first and falls back to Bing when rate-limited or unreachable. No key needed, uses the global proxy from Network. Original text is kept on failure"
       },
       "translate_fields": {
         "label": "Fields to translate",
@@ -816,5 +820,11 @@
     "noLocal": "No local avatar in amane: {{count}} ({{names}}); run actor scraping for them first",
     "notInAmane": "No actor with the same name in amane: {{count}} ({{names}})",
     "failedLine": "Upload failed: {{count}} ({{names}}); see the log"
+  },
+  "translateTest": {
+    "button": "Test translation",
+    "hint": "Sends one real request to Google Translate with the saved network settings; save proxy changes first",
+    "ok": "Works ({{provider}}): {{source}} → {{text}}",
+    "failed": "Test failed"
   }
 }

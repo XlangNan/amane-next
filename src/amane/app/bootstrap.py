@@ -199,6 +199,7 @@ async def start_app(config: ConfigManager | None = None) -> AppSession:
             repo=repo,
             event_bus=event_bus,
             use_polling=hot.watcher.use_polling,
+            observer_timeout=hot.watcher.polling_interval_seconds if hot.watcher.use_polling else 1.0,
             media_extensions=hot.watcher.media_extensions,
             debounce_seconds=hot.watcher.debounce_seconds,
         )

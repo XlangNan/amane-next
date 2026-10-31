@@ -1,0 +1,9 @@
+/*
+  横向布局 (bool 行): 标签与控件同排, 窄屏改为纵向堆叠.
+  对齐在 `field-chrome.tsx` 里按断点给, 不在这里声明.
+*/
+@media (max-width: 47.99em) {
+  .horizontalRow {
+    flex-direction: column;
+  }
+}

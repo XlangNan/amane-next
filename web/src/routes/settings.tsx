@@ -18,6 +18,7 @@ import { useTranslation } from "react-i18next";
 import { z } from "zod";
 import { isHidden, resolveSchema } from "@/components/schema-form/schema";
 import { SchemaForm } from "@/components/schema-form/schema-form";
+import { TranslateTest } from "@/components/settings/translate-test";
 import { useConfig, useConfigSchema, useUpdateConfig } from "@/hooks/use-config";
 import { useNarrowViewport } from "@/hooks/use-narrow-viewport";
 import { extractErrorMessage } from "@/lib/api-error";
@@ -128,6 +129,7 @@ function SettingsPage() {
                     onSave={(patch) => saveMutation.mutate({ body: { [key]: patch } })}
                     saving={saveMutation.isPending}
                   />
+                  {key === "translate" && <TranslateTest />}
                 </Paper>
               );
             })}

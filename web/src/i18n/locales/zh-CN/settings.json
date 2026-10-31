@@ -545,6 +545,10 @@
       "media_extensions": {
         "label": "媒体扩展名",
         "description": "监控和扫描的媒体文件扩展名列表, 逗号分隔"
+      },
+      "polling_interval_seconds": {
+        "label": "轮询间隔 (秒)",
+        "description": "轮询模式下每隔多久扫描一遍全部监控目录. 越小发现新文件越快, 但 CPU 占用越高; 目录文件多时建议 60 秒以上. 重启后生效"
       }
     },
     "sr": {
@@ -770,7 +774,7 @@
     "translate": {
       "enabled": {
         "label": "启用翻译",
-        "description": "刮削时用谷歌免费翻译把标题 / 简介翻成「字段语言」里设定的目标语言; 无需密钥, 经「网络」里的全局代理访问 (国内一般需要代理). 失败时保留原文"
+        "description": "刮削时把标题 / 简介翻成「字段语言」里设定的目标语言; 先用谷歌免费翻译, 被限流或连不上时自动改用必应翻译. 无需密钥, 经「网络」里的全局代理访问. 失败时保留原文"
       },
       "translate_fields": {
         "label": "翻译字段",
@@ -816,5 +820,11 @@
     "noLocal": "amane 里没有本地头像: {{count}} 位 ({{names}}); 先对这些演员做演员刮削",
     "notInAmane": "amane 演员库里找不到同名演员: {{count}} 位 ({{names}})",
     "failedLine": "上传失败: {{count}} 位 ({{names}}); 详情见日志"
+  },
+  "translateTest": {
+    "button": "测试翻译",
+    "hint": "用已保存的网络设置真实请求一次谷歌翻译; 改了网络代理后请先保存再测试",
+    "ok": "可用 ({{provider}}): {{source}} → {{text}}",
+    "failed": "测试失败"
   }
 }
