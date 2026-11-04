@@ -1,4 +1,5 @@
 from collections.abc import Collection, Mapping, Sequence
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Unpack, cast
 
@@ -12,6 +13,8 @@ from ...utils.collections import unique_ids
 from ...utils.language import has_kana
 from ...utils.text import normalize_long_text
 from ..models import (
+    Actor,
+    Library,
     MediaFile,
     Metadata,
     MetadataActor,
@@ -23,6 +26,8 @@ from ..models import (
     Series,
     SortOrder,
     Studio,
+    Task,
+    TaskStatus,
     has_subtitle_predicate,
     metadata_number_predicate,
     metadata_vr_predicate,
@@ -109,6 +114,16 @@ def _merge_auto_locks(fields: MetadataFields, locked: set[MetadataField]) -> lis
     """MANUAL 写入: 把本次写入的可锁列并入锁定集."""
     written = {_LOCK_COLUMN_FIELD[key] for key in fields if key in _LOCK_COLUMN_FIELD}
     return [str(field) for field in MetadataField if field in locked | written]
+
+
+@dataclass(frozen=True)
+class DashboardCounts:
+    metadata: int
+    actors: int
+    media_files: int
+    libraries: int
+    untranslated: int
+    tasks_by_status: dict[TaskStatus, int]
 
 
 class MetadataRepoMixin(RepositoryMixinBase):
@@ -241,6 +256,25 @@ class MetadataRepoMixin(RepositoryMixinBase):
             stmt = select(col(Metadata.id), col(Metadata.content_type)).where(col(Metadata.id).in_(unique))
             rows = (await session.exec(stmt)).all()
             return {row_id: content_type for row_id, content_type in rows if row_id is not None}
+
+    async def dashboard_counts(self) -> DashboardCounts:
+        """首页仪表盘用的各项总数. ``untranslated`` 为标题或简介里仍含日文假名的影片数."""
+        async with self._session() as session:
+            metadata_total = (await session.exec(select(count()).select_from(Metadata))).one()
+            actors_total = (await session.exec(select(count()).select_from(Actor))).one()
+            media_total = (await session.exec(select(count()).select_from(MediaFile))).one()
+            library_total = (await session.exec(select(count()).select_from(Library))).one()
+            status_rows = (await session.exec(select(col(Task.status), count()).group_by(col(Task.status)))).all()
+            text_rows = (await session.exec(select(col(Metadata.title), col(Metadata.plot)))).all()
+        untranslated = sum(1 for title, plot in text_rows if has_kana(title or "") or has_kana(plot or ""))
+        return DashboardCounts(
+            metadata=metadata_total,
+            actors=actors_total,
+            media_files=media_total,
+            libraries=library_total,
+            untranslated=untranslated,
+            tasks_by_status={status: total for status, total in status_rows},
+        )
 
     async def all_metadata_scrape_targets(self, *, only_with_kana: bool = False) -> list[tuple[str, ContentType]]:
         """全部影片条目的 (番号, 内容类型), 按 id 升序; 供整库重新刮削.

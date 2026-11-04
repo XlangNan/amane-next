@@ -8,6 +8,7 @@
 
 | 域 | 路由 | 页面文件 | 主要协作文件 |
 |----|------|---------|-------------|
+| **Browse** | `/` | `routes/index.tsx` | `components/dashboard/dashboard-page.tsx` (汇总走 `GET /dashboard`, 最近更新走 `GET /metadata`) |
 | **Browse** | `/meta` | `routes/meta.tsx` + `meta.index.tsx` | `components/media/` (`poster-grid` / `meta-table` / `facet-filter-controls`), `lib/media/browse.ts` |
 | **Browse** | `/meta/$metadataId` | `routes/meta.$metadataId.tsx` | `components/media/playback-panel.tsx` → `playback-player.tsx`, `comment-section.tsx` → `comment-body.tsx`, `lib/media/comment-segments.ts`, `lib/media/metadata-fields.ts`, `components/media/field-lock.tsx` |
 | **Browse** | `/actors` | `routes/actors.tsx` + `actors.index.tsx` | `components/media/actor-grid.tsx` / `actor-table.tsx`, `lib/actors/browse.ts` |

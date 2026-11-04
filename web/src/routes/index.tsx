@@ -1,8 +1,4 @@
-import { createFileRoute, redirect } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
+import { DashboardPage } from "@/components/dashboard/dashboard-page";
 
-export const Route = createFileRoute("/")({
-  beforeLoad: () => {
-    // eslint-disable-next-line @typescript-eslint/only-throw-error
-    throw redirect({ to: "/meta" });
-  },
-});
+export const Route = createFileRoute("/")({ component: DashboardPage });

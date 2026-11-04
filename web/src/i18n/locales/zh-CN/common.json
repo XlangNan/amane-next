@@ -54,7 +54,8 @@
       "browse": "浏览",
       "manage": "管理",
       "ops": "运行"
-    }
+    },
+    "dashboard": "仪表盘"
   },
   "defaults": {
     "set": "设为默认",

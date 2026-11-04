@@ -1,0 +1,30 @@
+{
+  "title": "仪表盘",
+  "loadError": "加载仪表盘失败",
+  "workerPaused": "任务引擎已暂停, 排队中的任务不会执行. 到「任务」页可恢复",
+  "justNow": "刚刚",
+  "stats": {
+    "metadata": "影片",
+    "actors": "演员",
+    "mediaFiles": "视频文件",
+    "libraries": "媒体库"
+  },
+  "tasks": {
+    "title": "任务",
+    "viewAll": "全部任务",
+    "empty": "还没有任务"
+  },
+  "translate": {
+    "title": "翻译",
+    "on": "已启用",
+    "off": "未启用",
+    "untranslatedHint": "标题或简介里还含日文假名的影片数",
+    "actionOn": "到「影片」页点「重刮仍是日文的」补翻译, 刮完再到媒体库重新整理落盘",
+    "actionOff": "到「设置 → 翻译」启用翻译后, 再到「影片」页点「重刮仍是日文的」"
+  },
+  "recent": {
+    "title": "最近更新",
+    "viewAll": "全部影片",
+    "empty": "还没有影片"
+  }
+}

@@ -22,6 +22,7 @@ import {
   IconFileText,
   IconFolders,
   IconLanguage,
+  IconLayoutDashboard,
   IconLayoutSidebarLeftCollapse,
   IconLayoutSidebarLeftExpand,
   IconListDetails,
@@ -71,6 +72,7 @@ const NAV_GROUPS: NavGroup[] = [
     key: "browse",
     labelKey: "nav.groups.browse",
     items: [
+      { to: "/", labelKey: "nav.dashboard", icon: IconLayoutDashboard, end: true },
       { to: "/meta", labelKey: "nav.meta", icon: IconMovie },
       { to: "/actors", labelKey: "nav.actors", icon: IconUsers },
       { to: "/catalog", labelKey: "nav.catalog", icon: IconCategory },

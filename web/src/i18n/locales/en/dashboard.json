@@ -1,0 +1,30 @@
+{
+  "title": "Dashboard",
+  "loadError": "Failed to load the dashboard",
+  "workerPaused": "The task engine is paused; queued tasks will not run. Resume it on the Tasks page",
+  "justNow": "just now",
+  "stats": {
+    "metadata": "Movies",
+    "actors": "Actors",
+    "mediaFiles": "Video files",
+    "libraries": "Libraries"
+  },
+  "tasks": {
+    "title": "Tasks",
+    "viewAll": "All tasks",
+    "empty": "No tasks yet"
+  },
+  "translate": {
+    "title": "Translation",
+    "on": "On",
+    "off": "Off",
+    "untranslatedHint": "Movies whose title or plot still contains kana",
+    "actionOn": "Use \"Rescrape still-Japanese\" on the Movies page, then re-organize the library",
+    "actionOff": "Enable translation in Settings → Translation, then use \"Rescrape still-Japanese\" on the Movies page"
+  },
+  "recent": {
+    "title": "Recently updated",
+    "viewAll": "All movies",
+    "empty": "No movies yet"
+  }
+}

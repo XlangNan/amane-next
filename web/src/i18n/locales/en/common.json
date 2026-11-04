@@ -54,7 +54,8 @@
       "browse": "Browse",
       "manage": "Manage",
       "ops": "Run"
-    }
+    },
+    "dashboard": "Dashboard"
   },
   "defaults": {
     "set": "Set as default",
